@@ -1,0 +1,19 @@
+{% load i18n %}
+
+<!-- Simple Language Switcher -->
+<div class="language-switcher">
+    <form action="{% url 'set_language' %}" method="post">
+        {% csrf_token %}
+        <input name="next" type="hidden" value="{{ request.get_full_path }}">
+        
+        {% if LANGUAGE_CODE == 'en' %}
+            <button type="submit" name="language" value="fr" class="btn btn-sm btn-outline-secondary">
+                Switch to French
+            </button>
+        {% else %}
+            <button type="submit" name="language" value="en" class="btn btn-sm btn-outline-secondary">
+                Switch to English
+            </button>
+        {% endif %}
+    </form>
+</div>

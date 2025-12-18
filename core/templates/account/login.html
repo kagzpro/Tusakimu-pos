@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Login -Ets Ideal Inventory Management {% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-4">
+            <div class="card shadow-lg border-0 rounded-lg mt-5">
+                <div class="card-header bg-primary text-white text-center">
+                    <h3 class="my-3">
+                        <i class="fas fa-warehouse me-2"></i>
+                        Ets Ideal Inventory Management
+                    </h3>
+                    <p class="mb-0">Sign in to your account</p>
+                </div>
+                <div class="card-body p-4">
+                    <!-- Manual Login Form -->
+                    <form method="POST" action="{% url 'account_login' %}">
+                        {% csrf_token %}
+                        
+                        {% if form.errors %}
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            <strong>Error!</strong> Please check your credentials and try again.
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                        {% endif %}
+
+<div class="form-floating mb-3">
+    <input type="text" name="login" class="form-control" id="id_login" 
+           placeholder="Email or Username" required autofocus>
+    <label for="id_login">Email or Username</label>
+</div>
+
+                        <div class="form-floating mb-3">
+                            <input type="password" name="password" class="form-control" 
+                                   id="id_password" placeholder="Password" required>
+                            <label for="id_password">Password</label>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" name="remember" id="id_remember">
+                            <label class="form-check-label" for="id_remember">
+                                Remember me
+                            </label>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fas fa-sign-in-alt me-2"></i>Sign In
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- Additional Links -->
+                    <div class="text-center mt-4">
+                        <a href="{% url 'account_reset_password' %}" class="text-decoration-none">
+                            Forgot your password?
+                        </a>
+                    </div>
+                </div>
+                <div class="card-footer text-center py-3">
+                    <div class="small">
+                        Don't have an account? 
+                        <a href="{% url 'account_signup' %}" class="text-decoration-none">Contact administrator</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,254 @@
+#: .\core\templates\account\email\password_reset_key.html:6
+msgid "Password Reset"
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:9
+msgid "Password Reset Request"
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:10
+msgid "Hello!"
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:12
+#, python-format
+msgid ""
+"You're receiving this email because you requested a password reset for your "
+"account at %(site_name)s."
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:14
+msgid "Please click the link below to reset your password:"
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:25
+msgid "Reset Password"
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:29
+msgid "Or copy and paste this link in your browser:"
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:32
+msgid "If you didn't request this, please ignore this email."
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:34
+msgid "Thanks,"
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:35
+msgid "The"
+msgstr ""
+
+#: .\core\templates\account\email\password_reset_key.html:35
+msgid "Team"
+msgstr ""
+
+#: .\core\templates\account\password_reset_email.html:2
+#, python-format
+msgid "Hello from %(site_name)s!"
+msgstr ""
+
+#: .\core\templates\account\password_reset_email.html:4
+msgid ""
+"You're receiving this email because you requested a password reset for your "
+"user account."
+msgstr ""
+
+#: .\core\templates\account\password_reset_email.html:6
+msgid "Please go to the following page and choose a new password:"
+msgstr ""
+
+#: .\core\templates\account\password_reset_email.html:11
+msgid "Thanks for using our site!"
+msgstr ""
+
+#: .\core\templates\account\password_reset_email.html:13
+#, python-format
+msgid "The %(site_name)s team"
+msgstr ""
+
+#: .\templates\base.html:6
+msgid "Teba Inventory Management"
+msgstr ""
+
+#: .\templates\base.html:28
+msgid "Teba Paint Center"
+msgstr ""
+
+#: .\templates\base.html:43
+msgid "Dashboard"
+msgstr ""
+
+#: .\templates\base.html:50
+msgid "Inventory"
+msgstr ""
+
+#: .\templates\base.html:59
+msgid "Products & Stock"
+msgstr ""
+
+#: .\templates\base.html:62
+msgid "All Products"
+msgstr ""
+
+#: .\templates\base.html:66
+msgid "Categories"
+msgstr ""
+
+#: .\templates\base.html:69
+msgid "Suppliers"
+msgstr ""
+
+#: .\templates\base.html:72
+msgid "Stock Report"
+msgstr ""
+
+#: .\templates\base.html:81
+msgid "Transactions"
+msgstr ""
+
+#: .\templates\base.html:84
+msgid "Purchases"
+msgstr ""
+
+#: .\templates\base.html:87
+msgid "Sales"
+msgstr ""
+
+#: .\templates\base.html:90
+msgid "Transfers"
+msgstr ""
+
+#: .\templates\base.html:93
+msgid "Retail Sales"
+msgstr ""
+
+#: .\templates\base.html:102
+msgid "Stock Management"
+msgstr ""
+
+#: .\templates\base.html:105
+msgid "Stocktakes"
+msgstr ""
+
+#: .\templates\base.html:108
+msgid "New Stocktake"
+msgstr ""
+
+#: .\templates\base.html:114
+msgid "Data Management"
+msgstr ""
+
+#: .\templates\base.html:117
+msgid "Import Products"
+msgstr ""
+
+#: .\templates\base.html:120
+msgid "Export Template"
+msgstr ""
+
+#: .\templates\base.html:129
+msgid "Quick Actions"
+msgstr ""
+
+#: .\templates\base.html:136
+msgid "Add Product"
+msgstr ""
+
+#: .\templates\base.html:142
+msgid "New Purchase"
+msgstr ""
+
+#: .\templates\base.html:148
+msgid "New Sale"
+msgstr ""
+
+#: .\templates\base.html:154
+msgid "New Transfer"
+msgstr ""
+
+#: .\templates\base.html:167
+msgid "Orders"
+msgstr ""
+
+#: .\templates\base.html:171
+msgid "Purchase Orders"
+msgstr ""
+
+#: .\templates\base.html:174
+msgid "Sale Orders"
+msgstr ""
+
+#: .\templates\base.html:182
+msgid "Reports"
+msgstr ""
+
+#: .\templates\base.html:197
+msgid "Company"
+msgstr ""
+
+#: .\templates\base.html:205
+msgid "Admin"
+msgstr ""
+
+#: .\templates\base.html:208
+msgid "User Management"
+msgstr ""
+
+#: .\templates\base.html:210
+msgid "All Users"
+msgstr ""
+
+#: .\templates\base.html:213
+msgid "Add User"
+msgstr ""
+
+#: .\templates\base.html:216
+msgid "System"
+msgstr ""
+
+#: .\templates\base.html:218
+msgid "Django Admin"
+msgstr ""
+
+#: .\templates\base.html:228
+msgid "English"
+msgstr ""
+
+#: .\templates\base.html:231
+msgid "Franais"
+msgstr ""
+
+#: .\templates\base.html:257
+msgid "All Locations"
+msgstr ""
+
+#: .\templates\base.html:266
+msgid "My Profile"
+msgstr ""
+
+#: .\templates\base.html:269
+msgid "Change Password"
+msgstr ""
+
+#: .\templates\base.html:276
+msgid "Logout"
+msgstr ""
+
+#: .\templates\base.html:285
+msgid "Login"
+msgstr ""
+
+#: .\templates\base.html:330
+msgid "Teba Inventory Management System"
+msgstr ""
+
+#: .\templates\base.html:331
+msgid "All rights reserved."
+msgstr ""
+
+#: .\templates\base.html:338
+msgid "users"
+msgstr ""
