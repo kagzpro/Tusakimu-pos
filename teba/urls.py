@@ -8,6 +8,7 @@ from core.views import CustomLoginView
 
 
 urlpatterns = [
+     path('', RedirectView.as_view(url='/accounts/login/', permanent=False), name='home'),
     path('admin/', admin.site.urls),
 
     # Language switch endpoint (MUST be near the top)
