@@ -1,10 +1,13 @@
 {% if import_results %}
 <div class="card mt-4">
     <div class="card-header bg-success text-white">
-        <h5 class="mb-0">Import Results</h5>
+        <h5 class="mb-0">
+            <i class="fas fa-chart-bar me-2"></i>Import Results
+        </h5>
     </div>
     <div class="card-body">
-        <div class="row mb-3">
+        <!-- Summary Statistics -->
+        <div class="row mb-4">
             <div class="col-md-3">
                 <div class="card text-white bg-primary">
                     <div class="card-body text-center">
@@ -39,15 +42,35 @@
             </div>
         </div>
 
+        <!-- Unit Import Summary (NEW) -->
+        {% if import_results.units_imported %}
+        <div class="alert alert-info border-0 mb-3">
+            <div class="d-flex align-items-center">
+                <i class="fas fa-balance-scale fa-2x me-3"></i>
+                <div>
+                    <strong class="fs-5">{{ import_results.units_imported }}</strong> unit record(s) processed
+                    <br>
+                    <small class="text-muted">Multiple units of measure have been added to products</small>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Successfully Processed Items -->
         {% if import_results.success_items %}
-        <h6>Successfully Processed Items:</h6>
+        <h6 class="mb-3">
+            <i class="fas fa-check-circle text-success me-2"></i>Successfully Processed Items
+            <span class="badge bg-secondary ms-2">{{ import_results.success_items|length }}</span>
+        </h6>
         <div class="table-responsive">
-            <table class="table table-sm table-striped">
-                <thead>
+            <table class="table table-sm table-striped table-hover">
+                <thead class="table-dark">
                     <tr>
                         <th>Type</th>
                         <th>Name</th>
                         <th>SKU</th>
+                        <th>Base Unit</th>
+                        <th>Units</th>
                         <th>Locations & Quantities</th>
                     </tr>
                 </thead>
@@ -55,21 +78,50 @@
                     {% for item in import_results.success_items %}
                     <tr>
                         <td>
-                            <span class="badge {% if item.type == 'imported' %}bg-success{% else %}bg-warning{% endif %}">
+                            <span class="badge {% if item.type == 'imported' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                                <i class="fas {% if item.type == 'imported' %}fa-plus{% else %}fa-sync{% endif %} me-1"></i>
                                 {{ item.type|title }}
                             </span>
-                        </td>
-                        <td>{{ item.name }}</td>
-                        <td>{{ item.sku }}</td>
+                        </span></td>
+                        <td>
+                            <strong>{{ item.name }}</strong>
+                        </span></td>
+                        <td><code class="text-primary">{{ item.sku }}</code></span></td>
+                        <td>
+                            <span class="badge bg-info">
+                                <i class="fas fa-cube me-1"></i>
+                                {{ item.base_unit|default:"piece" }}
+                            </span>
+                        </span></td>
+                        <td>
+                            {% if item.units %}
+                                <div class="d-flex flex-wrap gap-1">
+                                    {% for unit in item.units %}
+                                    <span class="badge bg-secondary bg-opacity-10 text-dark border rounded-pill" title="{{ unit.desc }}">
+                                        <i class="fas fa-balance-scale me-1 text-info"></i>
+                                        {{ unit.name }}
+                                        {% if unit.qty %}({{ unit.qty }}){% endif %}
+                                    </span>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                <span class="text-muted fst-italic small">No units configured</span>
+                            {% endif %}
+                        </span></td>
                         <td>
                             {% if item.locations %}
-                                {% for loc in item.locations %}
-                                    <span class="badge bg-secondary">{{ loc }}</span>
-                                {% endfor %}
+                                <div class="d-flex flex-wrap gap-1">
+                                    {% for loc in item.locations %}
+                                    <span class="badge bg-secondary bg-opacity-10 text-dark border rounded-pill">
+                                        <i class="fas fa-map-marker-alt me-1 text-primary"></i>
+                                        {{ loc.name }}: <strong>{{ loc.quantity }}</strong>
+                                    </span>
+                                    {% endfor %}
+                                </div>
                             {% else %}
-                                <span class="text-muted">No locations</span>
+                                <span class="text-muted fst-italic small">No stock assigned</span>
                             {% endif %}
-                        </td>
+                        </span></td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -77,16 +129,93 @@
         </div>
         {% endif %}
 
-        {% if import_results.errors %}
-        <h6 class="text-danger mt-4">Errors & Warnings ({{ import_results.error_count }}):</h6>
-        <div class="alert alert-warning">
-            <ul class="mb-0">
-                {% for error in import_results.errors %}
-                <li>{{ error }}</li>
+        <!-- Unit Details Breakdown (NEW) -->
+        {% if import_results.unit_details %}
+        <div class="mt-4">
+            <h6 class="mb-3">
+                <i class="fas fa-list-ul text-info me-2"></i>Unit Details by Product
+            </h6>
+            <div class="accordion" id="unitAccordion">
+                {% for product in import_results.unit_details %}
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="heading{{ product.id }}">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                data-bs-target="#collapse{{ product.id }}">
+                            <strong>{{ product.name }}</strong> 
+                            <span class="badge bg-info ms-2">{{ product.units|length }} unit(s)</span>
+                        </button>
+                    </h2>
+                    <div id="collapse{{ product.id }}" class="accordion-collapse collapse" 
+                         data-bs-parent="#unitAccordion">
+                        <div class="accordion-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Unit Name</th>
+                                            <th>Quantity in Base</th>
+                                            <th>Selling Price (UGX)</th>
+                                            <th>Is Default</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for unit in product.units %}
+                                        <tr>
+                                            <td>
+                                                <strong>{{ unit.name|title }}</strong>
+                                            </span></td>
+                                            <td>1 {{ unit.name }} = {{ unit.qty_in_base }} {{ product.base_unit }}s</span></td>
+                                            <td class="text-end">UGX {{ unit.price|floatformat:0 }}</span></td>
+                                            <td>
+                                                {% if unit.is_default %}
+                                                    <span class="badge bg-success">Default</span>
+                                                {% else %}
+                                                    <span class="text-muted">-</span>
+                                                {% endif %}
+                                            </span></td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 {% endfor %}
-            </ul>
+            </div>
         </div>
         {% endif %}
+
+        <!-- Errors & Warnings -->
+        {% if import_results.errors %}
+        <div class="mt-4">
+            <h6 class="text-danger mb-3">
+                <i class="fas fa-exclamation-triangle me-2"></i>Errors & Warnings ({{ import_results.error_count }})
+            </h6>
+            <div class="alert alert-warning border-0">
+                <ul class="mb-0">
+                    {% for error in import_results.errors %}
+                    <li class="small">{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Export Options -->
+        <div class="mt-4 pt-3 border-top">
+            <div class="d-flex gap-2">
+                <a href="{% url 'inventory:product_list' %}" class="btn btn-primary btn-sm">
+                    <i class="fas fa-eye me-1"></i>View All Products
+                </a>
+                <a href="{% url 'inventory:export_products' %}" class="btn btn-outline-success btn-sm">
+                    <i class="fas fa-download me-1"></i>Export Data
+                </a>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()">
+                    <i class="fas fa-print me-1"></i>Print Report
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 {% endif %}

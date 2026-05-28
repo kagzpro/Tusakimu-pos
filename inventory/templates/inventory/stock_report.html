@@ -3,7 +3,7 @@
 {% block content %}
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h4 class="text-primary">Stock Report</h4>
+        <h4 class="text-white">Stock Report</h4>
         <div>
             <button class="btn btn-outline-primary" onclick="window.print()">
                 <i class="fas fa-print"></i> Print Report
@@ -14,7 +14,7 @@
     <!-- Filters Section -->
     <div class="card mb-4">
         <div class="card-header bg-light">
-            <h6 class="card-title mb-0">Filters</h6>
+            <h6 class="card-title mb-0 text-dark">Filters</h6>
         </div>
         <div class="card-body">
             <form method="get" class="row g-3">
@@ -137,8 +137,8 @@
     <!-- Stock Table -->
     <div class="card">
         <div class="card-header bg-light d-flex justify-content-between align-items-center">
-            <h6 class="card-title mb-0">Stock Details</h6>
-            <span class="badge bg-primary">Total Value: CDF {{ summary.total_value|floatformat:0 }}</span>
+            <h6 class="card-title mb-0 text-dark">Stock Details</h6>
+            <span class="badge bg-primary">Total Value: UGX {{ summary.total_value|floatformat:0 }}</span>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -148,10 +148,11 @@
                             <th>Product</th>
                             <th>SKU</th>
                             <th>Category</th>
-                            <th>Cost Price</th>
-                            <th>Selling Price</th>
+                            <th>Base Unit</th>
+                            <th>Cost Price (UGX)</th>
+                            <th>Selling Price (UGX)</th>
                             <th>Total Stock</th>
-                            <th>Stock Value</th>
+                            <th>Stock Value (UGX)</th>
                             <th>Reorder Level</th>
                             <th>Status</th>
                         </tr>
@@ -160,33 +161,43 @@
                         {% for product_data in product_data %}
                         <tr>
                             <td>
-                                <strong>{{ product_data.product.name }}</strong>
-                            </td>
+                                <a href="{% url 'inventory:product_detail' product_data.product.id %}" 
+                                   class="text-decoration-none fw-bold text-white">
+                                    {{ product_data.product.name }}
+                                </a>
+                            </span></td>
                             <td>
                                 <code>{{ product_data.product.sku }}</code>
-                            </td>
+                            </span></td>
                             <td>
                                 {% if product_data.product.category %}
                                     {{ product_data.product.category.name }}
                                 {% else %}
                                     <span class="text-muted">Uncategorized</span>
                                 {% endif %}
-                            </td>
+                            </span></td>
+                            <td>
+                                <span class="badge bg-info">{{ product_data.product.base_unit|default:"piece" }}</span>
+                            </span></td>
                             <td class="text-end">
-                                CDF {{ product_data.product.cost_price|floatformat:0 }}
-                            </td>
+                                UGX {{ product_data.product.cost_price|floatformat:0 }}
+                            </span></td>
                             <td class="text-end">
-                                CDF {{ product_data.product.selling_price|floatformat:0 }}
-                            </td>
+                                UGX {{ product_data.product.selling_price|floatformat:0 }}
+                            </span></td>
                             <td class="text-center">
                                 <strong>{{ product_data.total_stock }}</strong>
-                            </td>
+                                <br>
+                                <small class="text-muted">{{ product_data.product.base_unit }}s</small>
+                            </span></span></td>
                             <td class="text-end fw-bold">
-                                CDF {{ product_data.stock_value|floatformat:0 }}
-                            </td>
+                                UGX {{ product_data.stock_value|floatformat:0 }}
+                            </span></span></td>
                             <td class="text-center">
                                 {{ product_data.product.reorder_level }}
-                            </td>
+                                <br>
+                                <small class="text-muted">{{ product_data.product.base_unit }}s</small>
+                            </span></span></td>
                             <td class="text-center">
                                 {% if product_data.total_stock == 0 %}
                                     <span class="badge bg-danger">Out of Stock</span>
@@ -195,14 +206,76 @@
                                 {% else %}
                                     <span class="badge bg-success">In Stock</span>
                                 {% endif %}
-                            </td>
+                            </span></span></td>
                         </tr>
                         {% empty %}
                         <tr>
-                            <td colspan="9" class="text-center text-muted py-4">
+                            <td colspan="10" class="text-center text-muted py-4">
                                 <i class="fas fa-search fa-2x mb-2"></i><br>
                                 No products found matching your criteria
-                            </td>
+                            </span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stock Breakdown by Unit -->
+    <div class="card mt-4">
+        <div class="card-header bg-light">
+            <h6 class="card-title mb-0 text-dark">Stock Breakdown by Unit Type</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Product</th>
+                            <th>Unit Type</th>
+                            <th>Quantity in Unit</th>
+                            <th>Base Quantity</th>
+                            <th>Selling Price (UGX)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for product_data in product_data %}
+                            {% if product_data.product.units.all %}
+                                {% for unit in product_data.product.units.all %}
+                                <tr>
+                                    <td>
+                                        <a href="{% url 'inventory:product_detail' product_data.product.id %}" 
+                                           class="text-decoration-none">
+                                            {{ product_data.product.name }}
+                                        </a>
+                                    </span></td>
+                                    <td>
+                                        <span class="badge bg-info">{{ unit.unit_name|title }}</span>
+                                    </span></td>
+                                    <td class="text-center">
+                                        {% with stock_in_units=product_data.total_stock|default:0 %}
+                                            {% widthratio stock_in_units unit.quantity_in_base 1 %}
+                                        {% endwith %}
+                                     </span></td>
+                                    <td class="text-center">
+                                        {{ product_data.total_stock }}
+                                     </span></td>
+                                    <td class="text-end">
+                                        UGX {{ unit.selling_price|floatformat:0 }}
+                                     </span></td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="5" class="text-muted text-center">
+                                        <small>No units configured for this product</small>
+                                    </span></td>
+                                </tr>
+                            {% endif %}
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">No products found</span></td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -234,10 +307,13 @@
     font-weight: 600;
     font-size: 0.875rem;
     text-transform: uppercase;
-    color: #6c757d;
+    color: var(--muted);
 }
 .badge {
     font-size: 0.75rem;
+}
+.text-white {
+    color: white !important;
 }
 @media print {
     .btn, .card-header .badge, .text-muted {
@@ -246,6 +322,9 @@
     .card {
         border: none !important;
         box-shadow: none !important;
+    }
+    .table th {
+        color: #000 !important;
     }
 }
 </style>

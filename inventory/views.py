@@ -7,7 +7,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.db import models
-from django.db.models import Sum, Q, F
+from django.db.models import Q, Sum, Prefetch, F
 from django.utils import timezone
 from django.http import HttpResponse, JsonResponse
 from django.db import transaction
@@ -29,7 +29,7 @@ from .models import (
 from transactions.models import Customer
 from core.models import Location
 from .forms import SaleForm, PaymentForm
-
+from decimal import Decimal
 # Import location utilities
 from core.utils import get_user_locations, filter_queryset_by_user_locations, can_user_access_location, get_user_default_location
 
@@ -98,18 +98,24 @@ def inventory_dashboard(request):
 # =======================
 # PRODUCTS
 # =======================
+# inventory/views.py
+
+
 @login_required
 def product_list(request):
+    """Display products with their units of measure"""
     # Get user locations
     user_locations = get_user_locations(request.user)
     
-    # Base queryset with optimizations
+    # Base queryset with optimizations - include units
     products = Product.objects.filter(
         stocks__location__in=user_locations
     ).select_related('category').prefetch_related(
-        models.Prefetch(
-            'stocks',
+        Prefetch('stocks', 
             queryset=ProductStock.objects.filter(location__in=user_locations).select_related('location')
+        ),
+        Prefetch('units',  # ADD THIS - Prefetch units
+            queryset=ProductUnit.objects.all()
         )
     ).distinct()
     
@@ -171,10 +177,16 @@ def product_list(request):
     }
     return render(request, 'inventory/product_list.html', context)
 
+
 @login_required
 def product_detail(request, product_id):
+    """Display product details with units of measure"""
     product = get_object_or_404(
-        Product.objects.prefetch_related('stocks__location', 'category'), 
+        Product.objects.prefetch_related(
+            'stocks__location', 
+            'category',
+            'units'  # ADD THIS - Include units
+        ), 
         id=product_id
     )
     
@@ -185,19 +197,19 @@ def product_detail(request, product_id):
         location__in=user_locations
     ).select_related('location')
     
-    # Get purchases for this product through PurchaseItem (filtered by user locations)
+    # Get purchases for this product through PurchaseItem
     purchase_items = PurchaseItem.objects.filter(
         product=product,
         purchase__location__in=user_locations
     ).select_related('purchase', 'purchase__location').order_by('-purchase__purchase_date')
     
-    # Get sales for this product through SaleItem (filtered by user locations)
+    # Get sales for this product through SaleItem
     sale_items = SaleItem.objects.filter(
         product=product,
         sale__location__in=user_locations
     ).select_related('sale', 'sale__customer', 'sale__location').order_by('-sale__date')
     
-    # Get transfers (filtered by user locations)
+    # Get transfers
     transfers_out = StockTransfer.objects.filter(
         product=product, 
         batch__from_location__in=user_locations
@@ -208,13 +220,9 @@ def product_detail(request, product_id):
         batch__to_location__in=user_locations
     ).select_related('batch__from_location', 'batch__to_location', 'transferred_by').order_by('-transfer_date')
 
-    # Calculate total sold quantity
+    # Calculate totals
     total_sold = sum(item.quantity for item in sale_items)
-    
-    # Calculate total purchased quantity
     total_purchased = sum(item.quantity for item in purchase_items)
-    
-    # Calculate current stock
     current_stock = sum(stock.quantity for stock in stocks)
 
     context = {
@@ -234,18 +242,21 @@ def product_detail(request, product_id):
 @login_required
 @transaction.atomic
 def product_add(request):
+    """Add a new product with multiple units of measure"""
     user_locations = get_user_locations(request.user)
     categories = Category.objects.all()
     
     if request.method == 'POST':
         try:
-            # Get form data with proper defaults
+            # Get basic product data
             name = request.POST.get('name', '').strip()
             category_id = request.POST.get('category', '')
+            base_unit = request.POST.get('base_unit', 'piece')  # ADD THIS
             cost_price = request.POST.get('cost_price', '0')
             selling_price = request.POST.get('selling_price', '0')
             location_id = request.POST.get('location', '')
             qty = request.POST.get('quantity', '0')
+            reorder_level = request.POST.get('reorder_level', '10')
             
             # Validate required fields
             if not name:
@@ -258,7 +269,7 @@ def product_add(request):
                 messages.error(request, "Location is required")
                 return redirect('inventory:product_add')
             
-            # Check if user can access the selected location
+            # Check location permission
             try:
                 location = Location.objects.get(id=location_id)
                 if not can_user_access_location(request.user, location):
@@ -271,10 +282,11 @@ def product_add(request):
             # Convert numeric fields
             try:
                 cost_price = float(cost_price)
-                selling_price = float(selling_price)
-                qty = int(qty)
+                selling_price = float(selling_price) if selling_price else 0
+                qty = int(qty) if qty else 0
+                reorder_level = int(reorder_level) if reorder_level else 10
             except ValueError:
-                messages.error(request, "Please enter valid numeric values for prices and quantity")
+                messages.error(request, "Please enter valid numeric values")
                 return redirect('inventory:product_add')
             
             # Get category
@@ -287,25 +299,47 @@ def product_add(request):
             # Generate unique SKU
             sku = f"SKU-{uuid.uuid4().hex[:8].upper()}"
             
-            # Create product
+            # Create product with base unit
             product = Product(
                 name=name,
                 category=category,
                 sku=sku,
+                base_unit=base_unit,  # ADD THIS
                 cost_price=cost_price,
-                selling_price=selling_price
+                selling_price=selling_price,
+                reorder_level=reorder_level
             )
             product.save()
             
             # Create product stock
-            stock = ProductStock(
-                product=product,
-                location=location,
-                quantity=qty
-            )
-            stock.save()
+            if qty > 0:
+                stock = ProductStock(
+                    product=product,
+                    location=location,
+                    quantity=qty
+                )
+                stock.save()
             
-            messages.success(request, f"Product '{name}' added successfully!")
+            # ADD THIS - Create units of measure
+            # Get units from form (multiple unit rows)
+            unit_names = request.POST.getlist('unit_name[]')
+            unit_quantities = request.POST.getlist('unit_quantity[]')
+            unit_prices = request.POST.getlist('unit_price[]')
+            
+            for i in range(len(unit_names)):
+                if unit_names[i] and unit_quantities[i] and unit_prices[i]:
+                    try:
+                        ProductUnit.objects.create(
+                            product=product,
+                            unit_name=unit_names[i],
+                            quantity_in_base=float(unit_quantities[i]),
+                            selling_price=float(unit_prices[i]),
+                            is_default=(unit_names[i] == base_unit)
+                        )
+                    except Exception as e:
+                        print(f"Error creating unit: {e}")
+            
+            messages.success(request, f"Product '{name}' added successfully with {ProductUnit.objects.filter(product=product).count()} units!")
             return redirect('inventory:product_list')
             
         except Exception as e:
@@ -327,12 +361,173 @@ def product_add(request):
 
 @login_required
 @transaction.atomic
+def product_edit(request, pk):
+    try:
+        product = get_object_or_404(Product.objects.prefetch_related('units', 'stocks'), id=pk)
+        user_locations = get_user_locations(request.user)
+        categories = Category.objects.all()
+        
+        # Get current stock quantities
+        current_stocks = {}
+        stocks = ProductStock.objects.filter(product=product, location__in=user_locations)
+        for stock in stocks:
+            current_stocks[stock.location.id] = stock.quantity
+        
+        if request.method == 'POST':
+            try:
+                # Get form data
+                name = request.POST.get('name', '').strip()
+                category_id = request.POST.get('category')
+                base_unit = request.POST.get('base_unit', product.base_unit)
+                cost_price = request.POST.get('cost_price', '0')
+                selling_price = request.POST.get('selling_price', '0')
+                reorder_level = request.POST.get('reorder_level', product.reorder_level)
+                
+                if not name:
+                    messages.error(request, "Product name is required")
+                    return redirect('inventory:product_edit', pk=pk)
+                
+                if not category_id:
+                    messages.error(request, "Category is required")
+                    return redirect('inventory:product_edit', pk=pk)
+                
+                try:
+                    category = Category.objects.get(id=category_id)
+                except Category.DoesNotExist:
+                    messages.error(request, "Invalid category selected")
+                    return redirect('inventory:product_edit', pk=pk)
+                
+                try:
+                    cost_price = float(cost_price) if cost_price else 0.0
+                    selling_price = float(selling_price) if selling_price else 0.0
+                    reorder_level = int(reorder_level) if reorder_level else 10
+                except (ValueError, TypeError):
+                    messages.error(request, "Please enter valid numeric values")
+                    return redirect('inventory:product_edit', pk=pk)
+                
+                # Update product
+                product.name = name
+                product.category = category
+                product.base_unit = base_unit
+                product.cost_price = cost_price
+                product.selling_price = selling_price
+                product.reorder_level = reorder_level
+                product.save()
+                
+                # Update stock quantities
+                for location in user_locations:
+                    quantity_key = f'quantity_{location.id}'
+                    quantity_str = request.POST.get(quantity_key, '')
+                    
+                    try:
+                        quantity = int(quantity_str) if quantity_str else current_stocks.get(location.id, 0)
+                        quantity = max(0, quantity)
+                    except (ValueError, TypeError):
+                        quantity = current_stocks.get(location.id, 0)
+                    
+                    stock, created = ProductStock.objects.get_or_create(
+                        product=product,
+                        location=location,
+                        defaults={'quantity': quantity}
+                    )
+                    
+                    if not created and stock.quantity != quantity:
+                        stock.quantity = quantity
+                        stock.save()
+                
+                # UPDATE UNITS OF MEASURE
+                # Get all unit data from form
+                unit_ids = request.POST.getlist('unit_id[]')
+                unit_names = request.POST.getlist('unit_name[]')
+                unit_quantities = request.POST.getlist('unit_quantity[]')
+                unit_prices = request.POST.getlist('unit_price[]')
+                unit_defaults = request.POST.getlist('unit_default[]')
+                
+                # Get existing unit IDs to keep
+                keep_unit_ids = []
+                
+                for i in range(len(unit_names)):
+                    if unit_names[i] and unit_quantities[i] and unit_prices[i]:
+                        unit_id = unit_ids[i] if i < len(unit_ids) and unit_ids[i] else None
+                        
+                        if unit_id and unit_id != '':
+                            # Update existing unit
+                            try:
+                                unit = ProductUnit.objects.get(id=unit_id, product=product)
+                                unit.unit_name = unit_names[i].lower()
+                                unit.quantity_in_base = float(unit_quantities[i])
+                                unit.selling_price = float(unit_prices[i])
+                                unit.is_default = str(unit_ids[i]) in unit_defaults if unit_ids[i] else False
+                                unit.save()
+                                keep_unit_ids.append(unit.id)
+                            except ProductUnit.DoesNotExist:
+                                pass
+                        else:
+                            # Create new unit
+                            new_unit = ProductUnit.objects.create(
+                                product=product,
+                                unit_name=unit_names[i].lower(),
+                                quantity_in_base=float(unit_quantities[i]),
+                                selling_price=float(unit_prices[i]),
+                                is_default=False
+                            )
+                            keep_unit_ids.append(new_unit.id)
+                
+                # Delete units that were removed
+                ProductUnit.objects.filter(product=product).exclude(id__in=keep_unit_ids).delete()
+                
+                # Ensure at least one default unit exists
+                if not ProductUnit.objects.filter(product=product, is_default=True).exists():
+                    first_unit = ProductUnit.objects.filter(product=product).first()
+                    if first_unit:
+                        first_unit.is_default = True
+                        first_unit.save()
+                
+                messages.success(request, f"Product '{name}' updated successfully with {ProductUnit.objects.filter(product=product).count()} units!")
+                return redirect('inventory:product_list')
+                
+            except Exception as e:
+                messages.error(request, f"Error updating product: {str(e)}")
+                context = {
+                    'product': product,
+                    'categories': categories,
+                    'locations': user_locations,
+                    'stocks': current_stocks,
+                    'units': product.units.all(),  # Pass units to template
+                }
+                return render(request, 'inventory/product_edit.html', context)
+        
+        else:
+            # GET request - show form with current data
+            context = {
+                'product': product,
+                'categories': categories,
+                'locations': user_locations,
+                'stocks': current_stocks,
+                'units': product.units.all(),  # IMPORTANT: Pass units to template
+            }
+            return render(request, 'inventory/product_edit.html', context)
+            
+    except Product.DoesNotExist:
+        messages.error(request, "Product not found")
+        return redirect('inventory:product_list')
+    except Exception as e:
+        messages.error(request, f"Error loading product: {str(e)}")
+        return redirect('inventory:product_list')
+
+
+@login_required
+@transaction.atomic
 def product_delete(request, pk):
+    """Delete product and all related data"""
     try:
         product = get_object_or_404(Product, id=pk)
         product_name = product.name
         
-        # Delete associated stock records first (only in user's locations)
+        # Delete units first (ADD THIS)
+        ProductUnit.objects.filter(product=product).delete()
+        
+        # Delete associated stock records
         user_locations = get_user_locations(request.user)
         ProductStock.objects.filter(product=product, location__in=user_locations).delete()
         
@@ -350,134 +545,64 @@ def product_delete(request, pk):
         return redirect('inventory:product_list')
 
 
+# ADD THIS - API endpoint to get product units for sale
 @login_required
-@transaction.atomic
-def product_edit(request, pk):
+def get_product_units_api(request, product_id):
+    """API endpoint to get product units for AJAX calls"""
     try:
-        product = get_object_or_404(Product, id=pk)
-        user_locations = get_user_locations(request.user)
-        categories = Category.objects.all()
+        product = Product.objects.get(id=product_id)
+        units = product.units.all()
         
-        # Get current stock quantities
-        current_stocks = {}
-        stocks = ProductStock.objects.filter(product=product, location__in=user_locations)
-        for stock in stocks:
-            current_stocks[stock.location.id] = stock.quantity
+        data = {
+            'product_id': product.id,
+            'product_name': product.name,
+            'base_unit': product.base_unit,
+            'units': []
+        }
         
-        if request.method == 'POST':
-            try:
-                # Get form data
-                name = request.POST.get('name', '').strip()
-                category_id = request.POST.get('category')
-                cost_price = request.POST.get('cost_price', '0')
-                selling_price = request.POST.get('selling_price', '0')
-                
-                # Validate required fields
-                if not name:
-                    messages.error(request, "Product name is required")
-                    return redirect('inventory:product_edit', pk=pk)
-                
-                if not category_id:
-                    messages.error(request, "Category is required")
-                    return redirect('inventory:product_edit', pk=pk)
-                
-                # Get category
-                try:
-                    category = Category.objects.get(id=category_id)
-                except Category.DoesNotExist:
-                    messages.error(request, "Invalid category selected")
-                    return redirect('inventory:product_edit', pk=pk)
-                
-                # Convert numeric fields with proper validation
-                try:
-                    cost_price = float(cost_price) if cost_price else 0.0
-                    selling_price = float(selling_price) if selling_price else 0.0
-                except (ValueError, TypeError):
-                    messages.error(request, "Please enter valid numeric values for prices")
-                    return redirect('inventory:product_edit', pk=pk)
-                
-                # Update product basic info
-                product.name = name
-                product.category = category
-                product.cost_price = cost_price
-                product.selling_price = selling_price
-                product.save()
-                
-                # Update stock quantities for each user location
-                for location in user_locations:
-                    quantity_key = f'quantity_{location.id}'
-                    quantity_str = request.POST.get(quantity_key, '')
-                    
-                    # Handle quantity parsing more carefully
-                    try:
-                        if quantity_str == '' or quantity_str is None:
-                            # If no quantity provided, keep existing quantity or set to 0
-                            quantity = current_stocks.get(location.id, 0)
-                        else:
-                            quantity = int(quantity_str)
-                            
-                        # Ensure quantity is not negative
-                        quantity = max(0, quantity)
-                        
-                    except (ValueError, TypeError):
-                        # If invalid quantity, keep existing quantity
-                        quantity = current_stocks.get(location.id, 0)
-                        messages.warning(request, f"Invalid quantity for {location.name}, using current value: {quantity}")
-                
-                    # Update or create ProductStock record
-                    stock, created = ProductStock.objects.get_or_create(
-                        product=product,
-                        location=location,
-                        defaults={'quantity': quantity}
-                    )
-                    
-                    if not created:
-                        # Only update if quantity actually changed
-                        if stock.quantity != quantity:
-                            stock.quantity = quantity
-                            stock.save()
-                
-                messages.success(request, f"Product '{name}' updated successfully!")
-                return redirect('inventory:product_list')
-                
-            except Exception as e:
-                messages.error(request, f"Error updating product: {str(e)}")
-                # Return to form with current data
-                context = {
-                    'product': product,
-                    'categories': categories,
-                    'locations': user_locations,
-                    'stocks': current_stocks,
-                }
-                return render(request, 'inventory/product_edit.html', context)
+        for unit in units:
+            data['units'].append({
+                'id': unit.id,
+                'name': unit.unit_name,
+                'quantity_in_base': float(unit.quantity_in_base),
+                'selling_price': float(unit.selling_price)
+            })
         
-        else:
-            # GET request - show form with current data
-            context = {
-                'product': product,
-                'categories': categories,
-                'locations': user_locations,
-                'stocks': current_stocks,
-            }
-            return render(request, 'inventory/product_edit.html', context)
-            
+        # If no units defined, return default unit
+        if not data['units']:
+            data['units'].append({
+                'id': None,
+                'name': product.base_unit or 'piece',
+                'quantity_in_base': 1,
+                'selling_price': float(product.selling_price)
+            })
+        
+        return JsonResponse(data)
     except Product.DoesNotExist:
-        messages.error(request, "Product not found")
-        return redirect('inventory:product_list')
-    except Exception as e:
-        messages.error(request, f"Error loading product: {str(e)}")
-        return redirect('inventory:product_list')
+        return JsonResponse({'error': 'Product not found'}, status=404)
 
+
+# ADD THIS - Convert quantity between units
+def convert_quantity(quantity, from_unit, to_unit):
+    """Convert quantity from one unit to another"""
+    # Convert to base unit first
+    base_quantity = quantity * from_unit.quantity_in_base
+    # Convert to target unit
+    target_quantity = base_quantity / to_unit.quantity_in_base
+    return target_quantity
 # =======================
 # PURCHASES
 # =======================
 @login_required
 def purchase_list(request):
-    """List all purchases with batch items"""
+    """List all purchases with batch items and unit information"""
     # Get purchases filtered by user locations
     purchases = Purchase.objects.all()
     purchases = filter_queryset_by_user_locations(purchases, request.user)
-    purchases = purchases.select_related('location', 'created_by').prefetch_related('items__product').order_by('-purchase_date')
+    purchases = purchases.select_related('location', 'created_by').prefetch_related(
+        'items__product',
+        'items__product__units'
+    ).order_by('-purchase_date')
     
     # Apply filters
     search_query = request.GET.get('q', '')
@@ -503,7 +628,6 @@ def purchase_list(request):
         purchases = purchases.filter(supplier_name__icontains=supplier_filter)
     
     if location_filter:
-        # Only apply if user has access to this location
         try:
             location = Location.objects.get(id=location_filter)
             if can_user_access_location(request.user, location):
@@ -538,19 +662,16 @@ def purchase_list(request):
     }
     return render(request, 'inventory/purchase_list.html', context)
 
-
 @login_required
 @transaction.atomic
 def purchase_add(request):
-    """Add new purchase with multiple items"""
+    """Add new purchase with multiple items and units of measure support"""
     user_locations = get_user_locations(request.user)
-    products = Product.objects.all().select_related('category')
+    products = Product.objects.all().select_related('category').prefetch_related('units')
     
-    # ADD THIS: Get suppliers from database
     suppliers = Supplier.objects.all().order_by('name')
     
     if request.method == "POST":
-        # Handle both supplier selection and supplier name input
         supplier_id = request.POST.get('supplier')
         supplier_name = request.POST.get('supplier_name')
         location_id = request.POST.get('location')
@@ -558,10 +679,9 @@ def purchase_add(request):
         notes = request.POST.get('notes', '')
         items_data = request.POST.get('items_data')
 
-        # Determine supplier name - either from dropdown or text input
+        # Determine supplier name
         final_supplier_name = ""
         if supplier_id:
-            # Get supplier name from database if ID is provided
             try:
                 supplier = Supplier.objects.get(id=supplier_id)
                 final_supplier_name = supplier.name
@@ -578,7 +698,6 @@ def purchase_add(request):
             messages.error(request, "Location is required")
             return redirect('inventory:purchase_add')
 
-        # Check if user can access the selected location
         try:
             location = Location.objects.get(id=location_id)
             if not can_user_access_location(request.user, location):
@@ -611,7 +730,7 @@ def purchase_add(request):
             purchase_datetime = timezone.now()
 
         try:
-            # Create Purchase (main purchase record)
+            # Create Purchase
             purchase = Purchase.objects.create(
                 supplier_name=final_supplier_name,
                 location=location,
@@ -620,7 +739,7 @@ def purchase_add(request):
                 created_by=request.user
             )
 
-            # Create PurchaseItem records (batch items)
+            # Create PurchaseItem records with unit support
             total_amount = 0
             successful_items = []
             
@@ -628,10 +747,13 @@ def purchase_add(request):
                 product_id = item.get('product_id')
                 quantity = item.get('quantity', 0)
                 unit_price = item.get('unit_price', 0)
+                unit_id = item.get('unit_id')
+                base_quantity = item.get('base_quantity', quantity)
+                unit_name = item.get('unit_name', '')
                 
                 try:
                     product = Product.objects.get(id=product_id)
-                    quantity = int(quantity)
+                    quantity = float(quantity)
                     unit_price = float(unit_price)
                     
                     if quantity <= 0:
@@ -640,12 +762,15 @@ def purchase_add(request):
                     if unit_price <= 0:
                         continue
                     
-                    # Create the purchase item (batch item)
+                    # Create purchase item with unit information
                     purchase_item = PurchaseItem.objects.create(
                         purchase=purchase,
                         product=product,
                         quantity=quantity,
-                        unit_price=unit_price
+                        unit_price=unit_price,
+                        unit_id=unit_id if unit_id != 'default' else None,
+                        unit_name=unit_name,
+                        base_quantity=base_quantity if base_quantity > 0 else quantity
                     )
                     
                     item_total = quantity * unit_price
@@ -671,27 +796,38 @@ def purchase_add(request):
             return render(request, 'inventory/purchase_add.html', {
                 'locations': user_locations,
                 'products': products,
-                'suppliers': suppliers,  # ADD THIS
+                'suppliers': suppliers,
                 'form_data': request.POST
             })
 
     else:
-        # GET request - prepare context
+        # GET request - prepare context with unit information
         products_data = []
         for product in products:
+            units_data = []
+            for unit in product.units.all():
+                units_data.append({
+                    'id': unit.id,
+                    'name': unit.unit_name,
+                    'quantity_in_base': float(unit.quantity_in_base),
+                    'cost_price': float(unit.cost_price) if hasattr(unit, 'cost_price') else float(product.cost_price)
+                })
+            
             products_data.append({
                 'id': product.id,
                 'name': product.name,
                 'sku': product.sku,
                 'cost_price': str(product.cost_price),
                 'selling_price': str(product.selling_price),
-                'category_name': product.category.name if product.category else 'Uncategorized'
+                'category_name': product.category.name if product.category else 'Uncategorized',
+                'base_unit': product.base_unit,
+                'units': units_data
             })
         
         context = {
             'locations': user_locations,
             'products': products,
-            'suppliers': suppliers,  # ADD THIS LINE
+            'suppliers': suppliers,
             'products_json': json.dumps(products_data),
             'default_date': timezone.now().strftime('%Y-%m-%dT%H:%M'),
         }
@@ -750,12 +886,21 @@ def purchase_delete(request, pk):
 # =======================
 # SALES
 # =======================
+# inventory/views.py (Updated sale views with Units of Measure support)
+
+
+from .models import (
+     ProductUnit, 
+)
+
+
+
 @login_required
 def sale_list(request):
     """Show all sales"""
     sales = Sale.objects.all()
     sales = filter_queryset_by_user_locations(sales, request.user)
-    sales = sales.select_related('customer', 'location').prefetch_related('items').order_by('-date', '-created_at')
+    sales = sales.select_related('customer', 'location').prefetch_related('items__product').order_by('-date', '-created_at')
     
     context = {
         'sales': sales,
@@ -765,95 +910,179 @@ def sale_list(request):
 @login_required
 @transaction.atomic
 def sale_add(request):
-    print('herererererererer')
+    """Create a new sale with support for units of measure and multiple payments"""
     
     # Get locations from core app
     from core.models import Location
+    from decimal import Decimal
+    
     user_locations = get_user_locations(request.user)
     
     # Get customers from transactions app
     from transactions.models import Customer
     
     if request.method == 'POST':
-        print('its a post requrest')
+        # Debug: Print POST data
+        print("POST data:", request.POST)
+        print("Items data:", request.POST.get('items_data', '[]'))
+        print("Payment data:", request.POST.get('payment_data', '[]'))
+        
+        # Create form with POST data
         form = SaleForm(request.POST, user=request.user)
-        if form.is_valid():
-            try:
-                # Save the sale
-                sale = form.save(commit=False)
-                sale.created_by = request.user
+        
+        # Debug: Check form errors
+        if not form.is_valid():
+            print("Form errors:", form.errors)
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, f"{field}: {error}")
+            return redirect('inventory:sale_add')
+        
+        try:
+            # Save the sale
+            sale = form.save(commit=False)
+            sale.created_by = request.user
+            
+            # Check if user can access the selected location
+            if not can_user_access_location(request.user, sale.location):
+                messages.error(request, "You don't have permission to access this location")
+                return redirect('inventory:sale_add')
+            
+            # Set document status based on button clicked
+            is_draft = 'save_draft' in request.POST
+            sale.document_status = 'draft' if is_draft else 'sent'
+            
+            # Save sale to get ID
+            sale.save()
+            
+            # Process sale items from the hidden field with unit support
+            items_data = request.POST.get('items_data', '[]')
+            items = json.loads(items_data)
+            
+            print(f"Processing {len(items)} items...")
+            
+            total_amount = Decimal('0.00')
+            stock_errors = []
+            
+            for item in items:
+                product = get_object_or_404(Product, id=item['product_id'])
+                quantity = Decimal(str(item['quantity']))
+                unit_id = item.get('unit_id')
+                unit_price = Decimal(str(item.get('unit_price', 0)))
                 
-                # Check if user can access the selected location
-                if not can_user_access_location(request.user, sale.location):
-                    messages.error(request, "You don't have permission to access this location")
-                    return redirect('inventory:sale_add')
+                # Get the unit details for stock calculation
+                base_quantity = quantity
+                unit_name = "unit"
                 
-                # Set document status based on button clicked
-                is_draft = 'save_draft' in request.POST
-                sale.document_status = 'draft' if is_draft else 'sent'
+                if unit_id:
+                    try:
+                        product_unit = ProductUnit.objects.get(id=unit_id, product=product)
+                        base_quantity = quantity * Decimal(str(product_unit.quantity_in_base))
+                        unit_name = product_unit.unit_name
+                    except ProductUnit.DoesNotExist:
+                        base_quantity = quantity
+                        unit_name = product.base_unit or "piece"
+                else:
+                    base_quantity = quantity
+                    unit_name = product.base_unit or "piece"
                 
-                # Save sale to get ID
-                sale.save()
+                item_total = quantity * unit_price
                 
-                # Process sale items from the hidden field
-                items_data = request.POST.get('items_data', '[]')
-                items = json.loads(items_data)
+                # Create sale item with unit information
+                SaleItem.objects.create(
+                    sale=sale,
+                    product=product,
+                    quantity=float(quantity),
+                    unit_price=float(unit_price),
+                    total_price=float(item_total),
+                    unit_id=unit_id,
+                    unit_name=unit_name,
+                    base_quantity=float(base_quantity)
+                )
                 
-                total_amount = 0
-                for item in items:
-                    product = get_object_or_404(Product, id=item['product_id'])
-                    quantity = int(item['quantity'])
-                    unit_price = float(item['unit_price'])
-                    item_total = float(item['total'])
-                    
-                    # Create sale item
-                    sale_item = SaleItem.objects.create(
+                total_amount += item_total
+                
+                # REDUCE STOCK only if not a draft and not a quotation
+                if not is_draft and sale.document_type != 'quotation' and sale.location:
+                    try:
+                        updated = ProductStock.objects.filter(
+                            product=product, 
+                            location=sale.location,
+                            quantity__gte=base_quantity
+                        ).update(quantity=F('quantity') - base_quantity)
+                        
+                        if not updated:
+                            stock_errors.append(f"Not enough stock for {product.name} (need {base_quantity} {product.base_unit}s)")
+                        
+                    except ProductStock.DoesNotExist:
+                        stock_errors.append(f"No stock found for {product.name} at {sale.location.name}")
+            
+            # Check for stock errors
+            if stock_errors:
+                # Rollback by deleting the sale
+                sale.delete()
+                for error in stock_errors:
+                    messages.error(request, error)
+                return redirect('inventory:sale_add')
+            
+            # Update sale total amount
+            sale.total_amount = float(total_amount)
+            sale.save()
+            
+            # ========== PROCESS PAYMENTS ==========
+            payment_data = request.POST.get('payment_data', '[]')
+            payments = json.loads(payment_data)
+            
+            print(f"Processing {len(payments)} payments...")
+            
+            total_paid = Decimal('0.00')
+            for payment in payments:
+                amount = Decimal(str(payment.get('amount', 0)))
+                method = payment.get('method', 'cash')
+                reference = payment.get('reference', '')
+                
+                if amount > 0:
+                    Payment.objects.create(
                         sale=sale,
-                        product=product,
-                        quantity=quantity,
-                        unit_price=unit_price,
-                        total_price=item_total
+                        amount=float(amount),
+                        payment_method=method,
+                        reference_number=reference,
+                        payment_date=timezone.now(),
+                        received_by=request.user,
+                        notes=f"Payment via {method}"
                     )
-                    
-                    total_amount += item_total
-                    
-                    # REDUCE STOCK ONLY if not a draft and not a quotation
-                    if not is_draft and sale.document_type != 'quotation' and sale.location:
-                        try:
-                            # Use F() expression to prevent race conditions
-                            updated = ProductStock.objects.filter(
-                                product=product, 
-                                location=sale.location,
-                                quantity__gte=quantity
-                            ).update(quantity=F('quantity') - quantity)
-                            
-                            if not updated:
-                                raise ValueError(f"Not enough stock for {product.name}")
-                            
-                        except ProductStock.DoesNotExist:
-                            raise ValueError(f"No stock found for {product.name} at {sale.location.name}")
-                
-                # Update sale total amount
-                sale.total_amount = total_amount
+                    total_paid += amount
+                    print(f"Created payment: {method} - UGX {amount}")
+            
+            # Update sale paid amount
+            if total_paid > 0:
+                sale.paid_amount = float(total_paid)
+                if total_paid >= sale.total_amount:
+                    sale.document_status = 'paid'
+                elif total_paid > 0:
+                    sale.document_status = 'sent'
                 sale.save()
-                
-                # Success message
-                status_text = "drafted" if is_draft else "created"
+                print(f"Updated sale paid amount: UGX {total_paid}")
+            
+            # Success message
+            status_text = "drafted" if is_draft else "created"
+            payment_count = len(payments)
+            if payment_count > 0:
+                messages.success(request, f"Sale {sale.document_number} {status_text} successfully! {payment_count} payment(s) recorded.")
+            else:
                 messages.success(request, f"Sale {sale.document_number} {status_text} successfully!")
+            
+            # Redirect based on button clicked
+            if 'save_print' in request.POST or 'print' in request.POST:
+                return redirect('inventory:print_sale', pk=sale.id)
+            return redirect('inventory:sale_list')
                 
-                # Redirect based on button clicked
-                if 'print' in request.POST and not is_draft:
-                    return redirect('inventory:print_sale', pk=sale.id)
-                return redirect('inventory:sale_list')
-                    
-            except Exception as e:
-                messages.error(request, f"Error creating sale: {str(e)}")
-        else:
-            # Form has errors
-            messages.error(request, "Please correct the errors below.")
-    
+        except Exception as e:
+            messages.error(request, f"Error creating sale: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return redirect('inventory:sale_add')
     else:
-        print('its get request')
         form = SaleForm(user=request.user)
         # Set initial location to user's default
         default_location = get_user_default_location(request.user)
@@ -863,35 +1092,57 @@ def sale_add(request):
     # Filter locations in form to only show accessible ones
     form.fields['location'].queryset = user_locations
     
-    print('reaches')
-    print(f'Locations count: {user_locations.count()}')
-    print(f'Customers count: {Customer.objects.count()}')
-    print(f'Products count: {Product.objects.count()}')
+    # Get products with their units prefetched
+    products = Product.objects.all().select_related('category').prefetch_related('units')
     
     return render(request, 'inventory/sale_add.html', {
         'form': form,
         'document_types': DocumentType.choices,
         'currencies': Currency.choices,
-        'locations': user_locations,  # ADD THIS - locations from core app
-        'customers': Customer.objects.all(),  # ADD THIS - customers from transactions app
-        'products': Product.objects.all().select_related('category'),  # ADD THIS - products from inventory
-        'default_date': timezone.now().strftime('%Y-%m-%dT%H:%M'),  # ADD THIS
+        'locations': user_locations,
+        'customers': Customer.objects.all(),
+        'products': products,
+        'default_date': timezone.now().strftime('%Y-%m-%dT%H:%M'),
     })
+
+
+
 
 @login_required
 def api_products(request):
-    """API endpoint for product search"""
-    products = Product.objects.select_related('category').all()
+    """API endpoint for product search with units of measure"""
+    products = Product.objects.select_related('category').prefetch_related('units').all()
     product_list = []
     
     for product in products:
+        # Get units for this product
+        units = []
+        for unit in product.units.all():
+            units.append({
+                'id': unit.id,
+                'name': unit.unit_name,
+                'quantity_in_base': float(unit.quantity_in_base),
+                'selling_price': float(unit.selling_price)
+            })
+        
+        # If no units defined, create default unit
+        if not units:
+            units.append({
+                'id': None,
+                'name': product.base_unit or 'piece',
+                'quantity_in_base': 1,
+                'selling_price': float(product.selling_price)
+            })
+        
         product_list.append({
             'id': product.id,
             'name': product.name,
             'sku': product.sku,
             'cost_price': float(product.cost_price),
             'selling_price': float(product.selling_price),
-            'category_name': product.category.name if product.category else 'Uncategorized'
+            'base_unit': product.base_unit or 'piece',
+            'category_name': product.category.name if product.category else 'Uncategorized',
+            'units': units  # ADD THIS - Include units in API response
         })
     
     return JsonResponse({'products': product_list})
@@ -899,41 +1150,113 @@ def api_products(request):
 
 @login_required
 def api_product_stock(request, product_id, location_id):
-    """API endpoint for product stock at location"""
+    """API endpoint for product stock at location with unit conversion"""
     try:
         # Check if user can access this location
         location = Location.objects.get(id=location_id)
         if not can_user_access_location(request.user, location):
             return JsonResponse({'error': 'Access denied'}, status=403)
-            
+        
+        # Get product with units
+        product = Product.objects.prefetch_related('units').get(id=product_id)
+        
         stock = ProductStock.objects.get(
             product_id=product_id,
             location_id=location_id
         )
+        
+        # Calculate stock in different units
+        stock_in_units = {}
+        for unit in product.units.all():
+            stock_in_units[unit.unit_name] = {
+                'unit_id': unit.id,
+                'quantity': float(stock.quantity / unit.quantity_in_base),
+                'unit_name': unit.unit_name,
+                'selling_price': float(unit.selling_price)
+            }
+        
+        # Add base unit stock
+        stock_in_units[product.base_unit or 'piece'] = {
+            'unit_id': None,
+            'quantity': float(stock.quantity),
+            'unit_name': product.base_unit or 'piece',
+            'selling_price': float(product.selling_price)
+        }
+        
         return JsonResponse({
             'quantity': stock.quantity,
             'product': stock.product.name,
-            'location': stock.location.name
+            'location': stock.location.name,
+            'base_unit': product.base_unit or 'piece',
+            'stock_in_units': stock_in_units,  # ADD THIS - Stock in various units
+            'units': [  # ADD THIS - Available units for selling
+                {
+                    'id': unit.id,
+                    'name': unit.unit_name,
+                    'quantity_in_base': float(unit.quantity_in_base),
+                    'selling_price': float(unit.selling_price),
+                    'available_quantity': float(stock.quantity / unit.quantity_in_base)
+                }
+                for unit in product.units.all()
+            ]
         })
     except ProductStock.DoesNotExist:
-        return JsonResponse({'quantity': 0, 'product': '', 'location': ''})
+        return JsonResponse({'quantity': 0, 'product': '', 'location': '', 'stock_in_units': {}, 'units': []})
     except Location.DoesNotExist:
         return JsonResponse({'error': 'Location not found'}, status=404)
+    except Product.DoesNotExist:
+        return JsonResponse({'error': 'Product not found'}, status=404)
+
+
+@login_required
+def api_product_units(request, product_id):
+    """API endpoint to get product units for sale form - NEW"""
+    try:
+        product = Product.objects.prefetch_related('units').get(id=product_id)
+        
+        units = []
+        for unit in product.units.all():
+            units.append({
+                'id': unit.id,
+                'name': unit.unit_name,
+                'quantity_in_base': float(unit.quantity_in_base),
+                'selling_price': float(unit.selling_price),
+                'is_default': unit.is_default
+            })
+        
+        # If no units, create default
+        if not units:
+            units.append({
+                'id': None,
+                'name': product.base_unit or 'piece',
+                'quantity_in_base': 1,
+                'selling_price': float(product.selling_price),
+                'is_default': True
+            })
+        
+        return JsonResponse({
+            'product_id': product.id,
+            'product_name': product.name,
+            'base_unit': product.base_unit or 'piece',
+            'units': units
+        })
+    except Product.DoesNotExist:
+        return JsonResponse({'error': 'Product not found'}, status=404)
 
 
 @login_required
 def product_search_api(request):
-    """API endpoint for product search in sale form"""
+    """API endpoint for product search in sale form with units"""
     query = request.GET.get('q', '').strip()
     
     try:
-        # Query products with category
+        # Query products with category and units prefetched
         if query:
             products = Product.objects.filter(
                 Q(name__icontains=query) | Q(sku__icontains=query)
-            ).select_related('category')[:15]
+            ).select_related('category').prefetch_related('units')[:15]
         else:
-            products = Product.objects.all().select_related('category')[:10]
+            products = Product.objects.all().select_related('category').prefetch_related('units')[:10]
 
         product_list = []
         for product in products:
@@ -941,6 +1264,25 @@ def product_search_api(request):
             stock_quantity = ProductStock.objects.filter(
                 product_id=product.id
             ).aggregate(total=Sum('quantity'))['total'] or 0
+            
+            # Build units data
+            units = []
+            for unit in product.units.all():
+                units.append({
+                    'id': unit.id,
+                    'name': unit.unit_name,
+                    'quantity_in_base': float(unit.quantity_in_base),
+                    'selling_price': float(unit.selling_price)
+                })
+            
+            # If no units, create default
+            if not units:
+                units.append({
+                    'id': None,
+                    'name': product.base_unit or 'piece',
+                    'quantity_in_base': 1,
+                    'selling_price': float(product.selling_price)
+                })
 
             product_list.append({
                 'id': product.id,
@@ -948,7 +1290,9 @@ def product_search_api(request):
                 'sku': product.sku or 'N/A',
                 'selling_price': str(product.selling_price),
                 'category': product.category.name if product.category else 'General',
-                'stock': stock_quantity
+                'stock': stock_quantity,
+                'base_unit': product.base_unit or 'piece',
+                'units': units  # ADD THIS - Include units
             })
 
         return JsonResponse({'products': product_list})
@@ -959,9 +1303,12 @@ def product_search_api(request):
 
 @login_required
 def print_sale(request, pk):
+    """Print sale receipt with unit information"""
     sale = get_object_or_404(
         Sale.objects.select_related('customer', 'location', 'created_by')
-                    .prefetch_related('items__product'), 
+                    .prefetch_related(
+                        Prefetch('items__product', queryset=Product.objects.prefetch_related('units'))
+                    ), 
         id=pk
     )
     
@@ -975,10 +1322,10 @@ def print_sale(request, pk):
     if not company:
         # Create default company details if they don't exist
         company = CompanyDetails.objects.create(
-            name="Teba Inventory",
-            address="Your company address here",
-            phone="+255 XXX XXX XXX",
-            email="info@teba.com"
+            name="Tusakimu Enterprises",
+            address="Kampala, Uganda",
+            phone="+256 XXX XXX XXX",
+            email="info@tusakimu.com"
         )
     
     # Auto-print if requested
@@ -991,16 +1338,32 @@ def print_sale(request, pk):
     }
     return render(request, 'inventory/print_sale.html', context)
 
+
+# ADD THIS - Helper function to filter queryset by user locations
+def filter_queryset_by_user_locations(queryset, user, location_field='location'):
+    """Filter a queryset by locations the user has access to"""
+    user_locations = get_user_locations(user)
+    if user_locations:
+        filter_kwargs = {f'{location_field}__in': user_locations}
+        return queryset.filter(**filter_kwargs)
+    return queryset.none()
+
 # =======================
 # SALES REPORT (MISSING VIEW)
 # =======================
 @login_required
 def sales_report(request):
-    """Sales report with product-wise analysis"""
-    # Get all sales with related data
+    """Sales report with product-wise analysis including units of measure and payment methods"""
+    from decimal import Decimal
+    
+    # Get all sales with related data including payments
     sales = Sale.objects.filter(document_status='sent').select_related(
         'customer', 'location'
-    ).prefetch_related('items__product').order_by('-date')
+    ).prefetch_related(
+        'items__product',
+        'items__product__units',
+        'payments'
+    ).order_by('-date')
     
     # Filter by user locations
     sales = filter_queryset_by_user_locations(sales, request.user)
@@ -1025,7 +1388,6 @@ def sales_report(request):
     if customer_id:
         sales = sales.filter(customer_id=customer_id)
     if location_id:
-        # Also check if user has access to this location
         try:
             location = Location.objects.get(id=location_id)
             if can_user_access_location(request.user, location):
@@ -1035,33 +1397,80 @@ def sales_report(request):
     
     # Calculate product-wise sales data
     product_sales = {}
-    total_revenue = 0
-    total_cost = 0
-    total_profit = 0
+    total_revenue = Decimal('0.00')
+    total_cost = Decimal('0.00')
+    total_profit = Decimal('0.00')
+    unit_summary = {}
+    payment_method_summary = {}
+    total_quantity = 0
     
     for sale in sales:
+        # Track payment methods
+        for payment in sale.payments.all():
+            method = payment.get_payment_method_display()
+            if method not in payment_method_summary:
+                payment_method_summary[method] = {
+                    'count': 0,
+                    'total_amount': Decimal('0.00')
+                }
+            payment_method_summary[method]['count'] += 1
+            payment_method_summary[method]['total_amount'] += Decimal(str(payment.amount))
+        
         for item in sale.items.all():
             product = item.product
-            quantity = item.quantity
-            revenue = item.total_price
-            cost = product.cost_price * quantity
+            quantity = Decimal(str(item.quantity))
+            revenue = Decimal(str(item.total_price))
+            
+            base_qty = Decimal(str(item.base_quantity)) if item.base_quantity else quantity
+            cost = Decimal(str(product.cost_price)) * base_qty
             profit = revenue - cost
-            margin = (profit / revenue * 100) if revenue > 0 else 0
+            
+            # Calculate margin as Decimal
+            if revenue > 0:
+                margin = float(profit / revenue * 100)
+            else:
+                margin = 0
+            
+            unit_name = item.unit_name if item.unit_name else product.base_unit
+            unit_key = f"{product.id}_{unit_name}"
+            
+            if unit_key not in unit_summary:
+                unit_summary[unit_key] = {
+                    'unit_name': unit_name,
+                    'product_name': product.name,
+                    'quantity_sold': 0,
+                    'revenue': Decimal('0.00'),
+                    'base_quantity': 0
+                }
+            
+            unit_summary[unit_key]['quantity_sold'] += float(quantity)
+            unit_summary[unit_key]['revenue'] += revenue
+            unit_summary[unit_key]['base_quantity'] += float(base_qty)
             
             if product.id not in product_sales:
                 product_sales[product.id] = {
                     'product': product,
                     'quantity': 0,
-                    'revenue': 0,
-                    'cost': 0,
-                    'profit': 0,
-                    'margin': 0
+                    'revenue': Decimal('0.00'),
+                    'cost': Decimal('0.00'),
+                    'profit': Decimal('0.00'),
+                    'margin': 0,
+                    'units_sold': {}
                 }
             
-            product_sales[product.id]['quantity'] += quantity
+            if unit_name not in product_sales[product.id]['units_sold']:
+                product_sales[product.id]['units_sold'][unit_name] = {
+                    'quantity': 0,
+                    'revenue': Decimal('0.00')
+                }
+            product_sales[product.id]['units_sold'][unit_name]['quantity'] += float(quantity)
+            product_sales[product.id]['units_sold'][unit_name]['revenue'] += revenue
+            
+            product_sales[product.id]['quantity'] += float(quantity)
             product_sales[product.id]['revenue'] += revenue
             product_sales[product.id]['cost'] += cost
             product_sales[product.id]['profit'] += profit
+            total_quantity += float(quantity)
             
             total_revenue += revenue
             total_cost += cost
@@ -1070,16 +1479,16 @@ def sales_report(request):
     # Calculate average margin for each product
     for product_data in product_sales.values():
         if product_data['revenue'] > 0:
-            product_data['margin'] = (product_data['profit'] / product_data['revenue'] * 100)
+            product_data['margin'] = float(product_data['profit'] / product_data['revenue'] * 100)
     
-    # Convert to list and sort by revenue (highest first)
+    # Convert to list and sort by revenue
     product_sales_list = sorted(
         product_sales.values(), 
         key=lambda x: x['revenue'], 
         reverse=True
     )
     
-    # Get filter options (filtered by user locations)
+    # Get filter options
     categories = Category.objects.filter(
         product__saleitem__sale__in=sales
     ).distinct()
@@ -1090,20 +1499,21 @@ def sales_report(request):
     
     locations = get_user_locations(request.user)
     
+    # Convert Decimal to float for template
     context = {
         'product_sales': product_sales_list,
-        'total_revenue': total_revenue,
-        'total_cost': total_cost,
-        'total_profit': total_profit,
-        'total_margin': (total_profit / total_revenue * 100) if total_revenue > 0 else 0,
-        'total_quantity': sum(item['quantity'] for item in product_sales_list),
+        'total_revenue': float(total_revenue),
+        'total_cost': float(total_cost),
+        'total_profit': float(total_profit),
+        'total_margin': float(total_profit / total_revenue * 100) if total_revenue > 0 else 0,
+        'total_quantity': total_quantity,
+        'unit_summary': unit_summary,
+        'payment_method_summary': payment_method_summary,
         
-        # Filter options
         'categories': categories,
         'customers': customers,
         'locations': locations,
         
-        # Current filter values
         'date_from': date_from,
         'date_to': date_to,
         'category_id': category_id,
@@ -1113,7 +1523,6 @@ def sales_report(request):
     }
     
     return render(request, 'inventory/sales_report.html', context)
-
 
 # =======================
 # STOCK TRANSFERS
@@ -1175,12 +1584,11 @@ def transfer_list(request):
     }
     return render(request, 'inventory/transfer_list.html', context)
 
-
 @login_required
 @transaction.atomic
 def transfer_add(request):
     user_locations = get_user_locations(request.user)
-    products = Product.objects.all().select_related('category')
+    products = Product.objects.all().select_related('category').prefetch_related('units')
 
     if request.method == "POST":
         from_location_id = request.POST.get('from_location')
@@ -1201,7 +1609,6 @@ def transfer_add(request):
             from_location = Location.objects.get(id=from_location_id)
             to_location = Location.objects.get(id=to_location_id)
             
-            # Check if user can access both locations
             if not can_user_access_location(request.user, from_location):
                 messages.error(request, "You don't have permission to access the source location")
                 return redirect('inventory:transfer_add')
@@ -1247,17 +1654,19 @@ def transfer_add(request):
             created_by=request.user
         )
 
-        # Create StockTransfer items linked to this batch
+        # Create StockTransfer items linked to this batch with unit support
         successful_items = []
         failed_items = []
         
         for item in items:
             product_id = item.get('product_id')
-            quantity = item.get('quantity', 0)
+            quantity = float(item.get('quantity', 0))  # Quantity in selected unit (e.g., 2 boxes)
+            unit_id = item.get('unit_id')  # Get the unit ID
+            unit_name = item.get('unit_name', '')  # Get unit name
+            base_quantity = float(item.get('base_quantity', quantity))  # This should already be calculated in JavaScript
             
             try:
                 product = Product.objects.get(id=product_id)
-                quantity = int(quantity)
                 
                 if quantity <= 0:
                     failed_items.append({
@@ -1266,16 +1675,32 @@ def transfer_add(request):
                     })
                     continue
                 
-                # Check stock availability
+                # Get the unit details to calculate base quantity correctly
+                base_qty_conversion = 1
+                if unit_id and unit_id != 'default':
+                    try:
+                        product_unit = ProductUnit.objects.get(id=unit_id, product=product)
+                        base_qty_conversion = float(product_unit.quantity_in_base)
+                        # Calculate base quantity: 2 boxes * 100 = 200 base units
+                        calculated_base_quantity = quantity * base_qty_conversion
+                    except ProductUnit.DoesNotExist:
+                        calculated_base_quantity = quantity
+                else:
+                    calculated_base_quantity = quantity
+                
+                # Use the base_quantity from JavaScript if provided, otherwise calculate
+                final_base_quantity = base_quantity if base_quantity > 0 else calculated_base_quantity
+                
+                # Check stock availability in base units
                 try:
                     from_stock = ProductStock.objects.get(
                         product=product, 
                         location=from_location
                     )
-                    if from_stock.quantity < quantity:
+                    if from_stock.quantity < final_base_quantity:
                         failed_items.append({
                             'product': product.name,
-                            'reason': f'Insufficient stock. Available: {from_stock.quantity}'
+                            'reason': f'Insufficient stock. Available: {from_stock.quantity} base units, Requested: {final_base_quantity} base units ({quantity} {unit_name})'
                         })
                         continue
                 except ProductStock.DoesNotExist:
@@ -1285,15 +1710,24 @@ def transfer_add(request):
                     })
                     continue
                 
-                # Create the transfer item
+                # Create the transfer item with unit information
                 transfer = StockTransfer.objects.create(
                     batch=batch,
                     product=product,
-                    quantity=quantity,
+                    quantity=quantity,  # Store the quantity in the selected unit
                     transfer_date=transfer_datetime,
                     transferred_by=request.user,
                     status=StockTransfer.PENDING
                 )
+                
+                # Store unit information (add these fields to StockTransfer model)
+                # If fields don't exist, you'll need to add them via migration
+                if hasattr(transfer, 'unit_id'):
+                    transfer.unit_id = unit_id if unit_id != 'default' else None
+                    transfer.unit_name = unit_name
+                    transfer.base_quantity = final_base_quantity
+                    transfer.save()
+                
                 successful_items.append(transfer)
                 
             except Product.DoesNotExist:
@@ -1321,7 +1755,7 @@ def transfer_add(request):
             error_message = f'Failed to add {len(failed_items)} item(s): '
             for failed in failed_items:
                 error_message += f"{failed['product']}: {failed['reason']}; "
-            messages.warning(request, error_message)
+            messages.warning(request, error_message[:500])  # Limit message length
         
         return redirect('inventory:transfer_list')
 
@@ -1335,13 +1769,25 @@ def transfer_add(request):
         
         products_data = []
         for product in products:
+            # Include units in products_data
+            units_data = []
+            for unit in product.units.all():
+                units_data.append({
+                    'id': unit.id,
+                    'name': unit.unit_name,
+                    'quantity_in_base': float(unit.quantity_in_base),
+                    'selling_price': float(unit.selling_price)
+                })
+            
             products_data.append({
                 'id': product.id,
                 'name': product.name,
                 'sku': product.sku,
                 'cost_price': str(product.cost_price),
                 'selling_price': str(product.selling_price),
-                'category_name': product.category.name if product.category else 'Uncategorized'
+                'category_name': product.category.name if product.category else 'Uncategorized',
+                'base_unit': product.base_unit,
+                'units': units_data
             })
         
         context = {
@@ -1352,7 +1798,6 @@ def transfer_add(request):
             'default_date': timezone.now().strftime('%Y-%m-%dT%H:%M'),
         }
         return render(request, 'inventory/transfer_add.html', context)
-
 
 @login_required
 @transaction.atomic
@@ -1420,10 +1865,9 @@ def cancel_transfer(request, batch_id):
         'transfer_items': transfer_items
     })
 
-
 @login_required
 def transfer_detail(request, batch_id):
-    """View details of a specific transfer batch"""
+    """View details of a specific transfer batch with unit information"""
     batch = get_object_or_404(TransferBatch, id=batch_id)
     
     # Check if user can access the batch locations
@@ -1431,14 +1875,13 @@ def transfer_detail(request, batch_id):
         messages.error(request, "You don't have permission to view this transfer")
         return redirect('inventory:transfer_list')
         
-    transfer_items = batch.items.select_related('product').all()
+    transfer_items = batch.items.select_related('product').prefetch_related('product__units').all()
     
     context = {
         'batch': batch,
         'transfer_items': transfer_items,
     }
     return render(request, 'inventory/transfer_detail.html', context)
-
 
 # =======================
 # STOCK REPORT
@@ -1536,12 +1979,18 @@ def stock_report(request):
 
 
 # =======================
-# CSV EXPORT/IMPORT
+# # =======================
+# CSV EXPORT/IMPORT WITH UNITS
 # =======================
+
+import csv
+import io
+from django.http import HttpResponse
+from django.core.files.uploadedfile import InMemoryUploadedFile
 
 @login_required
 def export_products_csv(request):
-    """Export comprehensive products data to CSV"""
+    """Export comprehensive products data to CSV including units of measure"""
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="products_complete_export_{}.csv"'.format(
         timezone.now().strftime("%Y%m%d_%H%M%S")
@@ -1549,11 +1998,18 @@ def export_products_csv(request):
 
     writer = csv.writer(response)
     
-    # Comprehensive header
+    # Comprehensive header with units
     header = [
-        'ID', 'Name', 'SKU', 'Category', 'Cost Price', 'Selling Price', 
+        'ID', 'Name', 'SKU', 'Category', 'Base Unit', 'Cost Price', 'Selling Price', 
         'Reorder Level', 'Total Stock', 'Stock Value', 'Status'
     ]
+    
+    # Add unit columns (up to 5 units per product)
+    header.extend(['Unit1_Name', 'Unit1_QtyInBase', 'Unit1_Price'])
+    header.extend(['Unit2_Name', 'Unit2_QtyInBase', 'Unit2_Price'])
+    header.extend(['Unit3_Name', 'Unit3_QtyInBase', 'Unit3_Price'])
+    header.extend(['Unit4_Name', 'Unit4_QtyInBase', 'Unit4_Price'])
+    header.extend(['Unit5_Name', 'Unit5_QtyInBase', 'Unit5_Price'])
     
     # Add individual location stocks
     user_locations = get_user_locations(request.user)
@@ -1562,12 +2018,13 @@ def export_products_csv(request):
     
     writer.writerow(header)
 
-    # Get all products (not filtered by stock to include zero-stock items)
+    # Get all products with units and stocks
     products = Product.objects.all().select_related('category').prefetch_related(
         models.Prefetch(
             'stocks',
             queryset=ProductStock.objects.filter(location__in=user_locations)
-        )
+        ),
+        'units'  # Prefetch units
     )
 
     for product in products:
@@ -1589,6 +2046,7 @@ def export_products_csv(request):
             product.name,
             product.sku or '',
             product.category.name if product.category else 'Uncategorized',
+            product.base_unit or 'piece',
             f"{product.cost_price:.2f}",
             f"{product.selling_price:.2f}",
             product.reorder_level,
@@ -1597,6 +2055,17 @@ def export_products_csv(request):
             status
         ]
         
+        # Add unit data (up to 5 units)
+        units = list(product.units.all())
+        for i in range(5):
+            if i < len(units):
+                unit = units[i]
+                row.append(unit.unit_name)
+                row.append(str(unit.quantity_in_base))
+                row.append(str(unit.selling_price))
+            else:
+                row.extend(['', '', ''])
+        
         # Add stock quantities for each location
         for location in user_locations:
             location_stock = product.stocks.filter(location=location).first()
@@ -1604,6 +2073,331 @@ def export_products_csv(request):
         
         writer.writerow(row)
 
+    return response
+
+
+@login_required
+def import_products_csv(request):
+    """Import products from CSV with units of measure and multi-location stock"""
+    user_locations = get_user_locations(request.user)
+    
+    if request.method == 'POST':
+        csv_file = request.FILES.get('csv_file')
+        
+        if not csv_file:
+            messages.error(request, "Please select a CSV file to import")
+            return redirect('inventory:import_products')
+        
+        if not csv_file.name.endswith('.csv'):
+            messages.error(request, "Please upload a valid CSV file")
+            return redirect('inventory:import_products')
+        
+        # Read CSV file
+        try:
+            decoded_file = csv_file.read().decode('utf-8')
+            io_string = io.StringIO(decoded_file)
+            reader = csv.reader(io_string)
+            header = next(reader)  # Skip header row
+            
+            # Find column indices
+            col_indices = {
+                'name': header.index('Name') if 'Name' in header else None,
+                'sku': header.index('SKU') if 'SKU' in header else None,
+                'category': header.index('Category') if 'Category' in header else None,
+                'base_unit': header.index('Base Unit') if 'Base Unit' in header else None,
+                'cost_price': header.index('Cost Price') if 'Cost Price' in header else None,
+                'selling_price': header.index('Selling Price') if 'Selling Price' in header else None,
+                'reorder_level': header.index('Reorder Level') if 'Reorder Level' in header else None,
+            }
+            
+            # Find stock location columns
+            stock_columns = {}
+            location_names = [loc.name for loc in user_locations]
+            for idx, col in enumerate(header):
+                if col.startswith('Stock_'):
+                    location_name = col.replace('Stock_', '')
+                    if location_name in location_names:
+                        location = user_locations.filter(name=location_name).first()
+                        if location:
+                            stock_columns[idx] = location
+            
+            # Find unit columns (Unit1_Name, Unit1_QtyInBase, Unit1_Price, etc.)
+            unit_columns = []
+            for i in range(1, 6):  # Up to 5 units
+                name_col = f'Unit{i}_Name'
+                qty_col = f'Unit{i}_QtyInBase'
+                price_col = f'Unit{i}_Price'
+                if name_col in header and qty_col in header and price_col in header:
+                    unit_columns.append({
+                        'name_idx': header.index(name_col),
+                        'qty_idx': header.index(qty_col),
+                        'price_idx': header.index(price_col)
+                    })
+            
+            # Process rows
+            imported_count = 0
+            updated_count = 0
+            stock_updates_count = 0
+            units_imported = 0
+            errors = []
+            success_items = []
+            unit_details = []
+            
+            for row_num, row in enumerate(reader, start=2):
+                try:
+                    # Skip empty rows
+                    if not row or not any(row):
+                        continue
+                    
+                    # Get basic product info
+                    name = row[col_indices['name']].strip() if col_indices['name'] is not None else ''
+                    sku = row[col_indices['sku']].strip() if col_indices['sku'] is not None else ''
+                    category_name = row[col_indices['category']].strip() if col_indices['category'] is not None else ''
+                    base_unit = row[col_indices['base_unit']].strip() if col_indices['base_unit'] is not None else 'piece'
+                    
+                    if not name or not sku:
+                        errors.append(f"Row {row_num}: Product name and SKU are required")
+                        continue
+                    
+                    # Get or create category
+                    category = None
+                    if category_name:
+                        category, _ = Category.objects.get_or_create(name=category_name)
+                    
+                    # Get pricing
+                    cost_price = float(row[col_indices['cost_price']]) if col_indices['cost_price'] is not None and row[col_indices['cost_price']] else 0
+                    selling_price = float(row[col_indices['selling_price']]) if col_indices['selling_price'] is not None and row[col_indices['selling_price']] else 0
+                    reorder_level = int(row[col_indices['reorder_level']]) if col_indices['reorder_level'] is not None and row[col_indices['reorder_level']] else 10
+                    
+                    # Check if product exists
+                    product, created = Product.objects.get_or_create(
+                        sku=sku,
+                        defaults={
+                            'name': name,
+                            'category': category,
+                            'base_unit': base_unit,
+                            'cost_price': cost_price,
+                            'selling_price': selling_price,
+                            'reorder_level': reorder_level
+                        }
+                    )
+                    
+                    if not created:
+                        # Update existing product
+                        product.name = name
+                        product.category = category
+                        product.base_unit = base_unit
+                        product.cost_price = cost_price
+                        product.selling_price = selling_price
+                        product.reorder_level = reorder_level
+                        product.save()
+                        updated_count += 1
+                        item_type = 'updated'
+                    else:
+                        imported_count += 1
+                        item_type = 'imported'
+                    
+                    # Process units
+                    product_units = []
+                    for unit_col in unit_columns:
+                        unit_name = row[unit_col['name_idx']].strip() if unit_col['name_idx'] < len(row) else ''
+                        unit_qty = row[unit_col['qty_idx']].strip() if unit_col['qty_idx'] < len(row) else ''
+                        unit_price = row[unit_col['price_idx']].strip() if unit_col['price_idx'] < len(row) else ''
+                        
+                        if unit_name and unit_qty and unit_price:
+                            try:
+                                unit_qty = float(unit_qty)
+                                unit_price = float(unit_price)
+                                
+                                # Create or update unit
+                                product_unit, unit_created = ProductUnit.objects.get_or_create(
+                                    product=product,
+                                    unit_name=unit_name.lower(),
+                                    defaults={
+                                        'quantity_in_base': unit_qty,
+                                        'selling_price': unit_price,
+                                        'is_default': (unit_name.lower() == base_unit)
+                                    }
+                                )
+                                if not unit_created:
+                                    product_unit.quantity_in_base = unit_qty
+                                    product_unit.selling_price = unit_price
+                                    product_unit.save()
+                                product_units.append({
+                                    'name': unit_name,
+                                    'qty_in_base': unit_qty,
+                                    'price': unit_price,
+                                    'is_default': (unit_name.lower() == base_unit)
+                                })
+                                units_imported += 1
+                            except (ValueError, TypeError):
+                                errors.append(f"Row {row_num}: Invalid unit data for {unit_name}")
+                    
+                    # Process stock for each location
+                    location_stocks = []
+                    for idx, location in stock_columns.items():
+                        if idx < len(row) and row[idx]:
+                            try:
+                                quantity = int(row[idx])
+                                if quantity > 0:
+                                    stock, stock_created = ProductStock.objects.get_or_create(
+                                        product=product,
+                                        location=location,
+                                        defaults={'quantity': quantity}
+                                    )
+                                    if not stock_created:
+                                        stock.quantity = quantity
+                                        stock.save()
+                                    location_stocks.append(location.name)
+                                    stock_updates_count += 1
+                            except (ValueError, TypeError):
+                                errors.append(f"Row {row_num}: Invalid stock quantity for {location.name}")
+                    
+                    success_items.append({
+                        'type': item_type,
+                        'name': product.name,
+                        'sku': product.sku,
+                        'base_unit': product.base_unit,
+                        'units': [u['name'] for u in product_units],
+                        'locations': location_stocks
+                    })
+                    
+                    if product_units:
+                        unit_details.append({
+                            'id': product.id,
+                            'name': product.name,
+                            'base_unit': product.base_unit,
+                            'units': product_units
+                        })
+                    
+                except Exception as e:
+                    errors.append(f"Row {row_num}: {str(e)}")
+            
+            # Prepare results
+            import_results = {
+                'total_processed': imported_count + updated_count,
+                'imported_count': imported_count,
+                'updated_count': updated_count,
+                'stock_updates_count': stock_updates_count,
+                'units_imported': units_imported,
+                'errors': errors,
+                'error_count': len(errors),
+                'success_items': success_items,
+                'unit_details': unit_details
+            }
+            
+            context = {
+                'import_results': import_results,
+                'categories': Category.objects.all(),
+                'locations': user_locations,
+                'location_count': user_locations.count(),
+            }
+            
+            return render(request, 'inventory/import_products.html', context)
+            
+        except Exception as e:
+            messages.error(request, f"Error reading CSV file: {str(e)}")
+            return redirect('inventory:import_products')
+    
+    else:
+        context = {
+            'categories': Category.objects.all(),
+            'locations': user_locations,
+            'location_count': user_locations.count(),
+        }
+        return render(request, 'inventory/import_products.html', context)
+
+
+@login_required
+def export_sales_csv(request):
+    """Export sales data to CSV with payment methods and units"""
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="sales_export_{}.csv"'.format(
+        timezone.now().strftime("%Y%m%d_%H%M%S")
+    )
+    
+    writer = csv.writer(response)
+    
+    # Header
+    header = [
+        'Document Number', 'Date', 'Customer', 'Location', 'Document Type',
+        'Document Status', 'Total Amount', 'Paid Amount', 'Balance Due',
+        'Payment Method', 'Payment Reference', 'Items Count', 'Notes'
+    ]
+    writer.writerow(header)
+    
+    # Get sales
+    sales = Sale.objects.filter(document_status='sent').select_related('customer', 'location')
+    sales = filter_queryset_by_user_locations(sales, request.user)
+    
+    for sale in sales:
+        # Get payment info
+        payment_methods = []
+        payment_refs = []
+        for payment in sale.payments.all():
+            payment_methods.append(payment.get_payment_method_display())
+            if payment.reference_number:
+                payment_refs.append(payment.reference_number)
+        
+        row = [
+            sale.document_number,
+            sale.date.strftime("%Y-%m-%d %H:%M"),
+            sale.customer.name if sale.customer else 'Walk-in',
+            sale.location.name if sale.location else '',
+            sale.get_document_type_display(),
+            sale.get_document_status_display(),
+            f"{sale.total_amount:.2f}",
+            f"{sale.paid_amount:.2f}",
+            f"{sale.balance_due:.2f}",
+            ', '.join(payment_methods) if payment_methods else 'Not Paid',
+            ', '.join(payment_refs) if payment_refs else '',
+            sale.items.count(),
+            sale.notes
+        ]
+        writer.writerow(row)
+    
+    return response
+
+
+@login_required
+def export_products_template(request):
+    """Download template CSV for product import"""
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="products_import_template.csv"'
+    
+    writer = csv.writer(response)
+    
+    # Header with units and locations
+    header = [
+        'Name', 'SKU', 'Category', 'Base Unit', 'Cost Price', 'Selling Price', 'Reorder Level'
+    ]
+    
+    # Unit columns
+    header.extend(['Unit1_Name', 'Unit1_QtyInBase', 'Unit1_Price'])
+    header.extend(['Unit2_Name', 'Unit2_QtyInBase', 'Unit2_Price'])
+    header.extend(['Unit3_Name', 'Unit3_QtyInBase', 'Unit3_Price'])
+    
+    # Location columns
+    user_locations = get_user_locations(request.user)
+    for location in user_locations:
+        header.append(f'Stock_{location.name}')
+    
+    writer.writerow(header)
+    
+    # Example row
+    example_row = [
+        'Premium Emulsion Paint', 'PEP-001', 'Paint Products', 'piece', '15000', '25000', '100',
+        'piece', '1', '25000',
+        'packet', '4', '95000',
+        'carton', '48', '1080000',
+    ]
+    
+    # Add example stock for each location
+    for location in user_locations:
+        example_row.append('100')
+    
+    writer.writerow(example_row)
+    
     return response
 
 # =======================

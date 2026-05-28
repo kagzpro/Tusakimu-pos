@@ -4,20 +4,19 @@
 {% block content %}
 <div class="container mt-4">
     <div class="row justify-content-center">
-        <div class="col-lg-8">
+        <div class="col-lg-10">
             <div class="card shadow border-0">
                 <div class="card-header bg-primary text-white py-3">
                     <div class="d-flex align-items-center">
                         <i class="fas fa-cube fa-2x me-3"></i>
                         <div>
                             <h4 class="card-title mb-0">Add New Product</h4>
-                            <p class="mb-0 opacity-75">Create a new product in your inventory</p>
+                            <p class="mb-0 opacity-75">Create a new product with multiple units of measure</p>
                         </div>
                     </div>
                 </div>
                 
                 <div class="card-body p-4">
-                    <!-- Display error messages -->
                     {% if messages %}
                     <div class="mb-4">
                         {% for message in messages %}
@@ -37,7 +36,7 @@
                     </div>
                     {% endif %}
 
-                    <form method="POST" class="needs-validation" novalidate>
+                    <form method="POST" id="productForm" class="needs-validation" novalidate>
                         {% csrf_token %}
                         
                         <!-- Product Basic Information -->
@@ -55,12 +54,12 @@
                                         </span>
                                         <input type="text" 
                                                name="name" 
+                                               id="productName"
                                                class="form-control" 
                                                value="{{ form_data.name }}"
                                                placeholder="Enter product name"
                                                required>
                                     </div>
-                                    <div class="form-text">Enter a descriptive name for your product</div>
                                 </div>
 
                                 <div class="mb-3">
@@ -69,7 +68,7 @@
                                         <span class="input-group-text bg-light">
                                             <i class="fas fa-folder text-primary"></i>
                                         </span>
-                                        <select name="category" class="form-control select2" required>
+                                        <select name="category" class="form-control" required>
                                             <option value="">Choose a category...</option>
                                             {% for category in categories %}
                                             <option value="{{ category.id }}" 
@@ -79,6 +78,27 @@
                                             {% endfor %}
                                         </select>
                                     </div>
+                                </div>
+
+                                <!-- Base Unit -->
+                                <div class="mb-3">
+                                    <label class="form-label fw-semibold">Base Unit (Smallest Unit) *</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text bg-light">
+                                            <i class="fas fa-cube text-primary"></i>
+                                        </span>
+                                        <select name="base_unit" class="form-control" id="baseUnit" required>
+                                            <option value="">Select base unit...</option>
+                                            <option value="piece">Piece (pc)</option>
+                                            <option value="kilogram">Kilogram (kg)</option>
+                                            <option value="gram">Gram (g)</option>
+                                            <option value="liter">Liter (L)</option>
+                                            <option value="milliliter">Milliliter (ml)</option>
+                                            <option value="meter">Meter (m)</option>
+                                            <option value="centimeter">Centimeter (cm)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-text">This is your smallest selling unit (e.g., piece, gram, ml)</div>
                                 </div>
                             </div>
                         </div>
@@ -93,36 +113,127 @@
                                 <div class="row">
                                     <div class="col-md-6">
                                         <div class="mb-3">
-                                            <label class="form-label fw-semibold">Cost Price *</label>
+                                            <label class="form-label fw-semibold">Cost Price (UGX) per Base Unit *</label>
                                             <div class="input-group">
-                                                <span class="input-group-text bg-light">$</span>
+                                                <span class="input-group-text bg-light">UGX</span>
                                                 <input type="number" 
                                                        name="cost_price" 
+                                                       id="costPrice"
                                                        class="form-control" 
                                                        step="0.01" 
                                                        value="{{ form_data.cost_price|default:'0' }}"
                                                        placeholder="0.00"
                                                        required>
                                             </div>
-                                            <div class="form-text">Your purchase cost per unit</div>
+                                            <div class="form-text">Your purchase cost per base unit</div>
                                         </div>
                                     </div>
                                     <div class="col-md-6">
                                         <div class="mb-3">
-                                            <label class="form-label fw-semibold">Selling Price *</label>
+                                            <label class="form-label fw-semibold">Base Selling Price (UGX) per Base Unit</label>
                                             <div class="input-group">
-                                                <span class="input-group-text bg-light">$</span>
+                                                <span class="input-group-text bg-light">UGX</span>
                                                 <input type="number" 
                                                        name="selling_price" 
+                                                       id="baseSellingPrice"
                                                        class="form-control" 
                                                        step="0.01" 
                                                        value="{{ form_data.selling_price|default:'0' }}"
-                                                       placeholder="0.00"
-                                                       required>
+                                                       placeholder="0.00">
                                             </div>
-                                            <div class="form-text">Your selling price per unit</div>
+                                            <div class="form-text">Base reference price (auto-calculates unit prices)</div>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Units of Measure Section - Dropdown Style -->
+                        <div class="row">
+                            <div class="col-md-12 mb-4">
+                                <h5 class="text-primary mb-3">
+                                    <i class="fas fa-balance-scale me-2"></i>Units of Measure
+                                </h5>
+                                <p class="text-muted small mb-3">
+                                    Define different packaging/selling units for this product. 
+                                    <strong>Cost price</strong> is calculated automatically from base unit.<br>
+                                    <strong>Selling price</strong> can be manually adjusted or auto-calculated.
+                                </p>
+                                
+                                <div id="unitsContainer">
+                                    <!-- Default Unit Row (Piece) -->
+                                    <div class="unit-row mb-3 p-3 border rounded">
+                                        <div class="row align-items-end">
+                                            <div class="col-md-3">
+                                                <label class="form-label">Unit Name *</label>
+                                                <select name="unit_name[]" class="form-control unit-name-select" required>
+                                                    <option value="">Select unit type...</option>
+                                                    <option value="piece" selected>Piece (pc)</option>
+                                                    <option value="packet">Packet (pkt)</option>
+                                                    <option value="carton">Carton (ctn)</option>
+                                                    <option value="box">Box (box)</option>
+                                                    <option value="dozen">Dozen (doz)</option>
+                                                    <option value="gross">Gross (gr)</option>
+                                                    <option value="roll">Roll (roll)</option>
+                                                    <option value="bundle">Bundle (bdl)</option>
+                                                    <option value="set">Set (set)</option>
+                                                    <option value="pair">Pair (pr)</option>
+                                                    <option value="bag">Bag (bag)</option>
+                                                    <option value="bottle">Bottle (btl)</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label class="form-label">Quantity in Base *</label>
+                                                <input type="number" step="0.01" name="unit_quantity[]" class="form-control unit-quantity" value="1" placeholder="e.g., 50" required>
+                                                <small class="text-muted">= X base units</small>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label class="form-label">Cost Price (UGX)</label>
+                                                <input type="text" class="form-control unit-cost-price" readonly disabled style="background-color: #e9ecef;">
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label class="form-label">Selling Price (UGX) *</label>
+                                                <input type="number" step="0.01" name="unit_price[]" class="form-control unit-selling-price" required>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label class="form-label">Price per Base Unit</label>
+                                                <input type="text" class="form-control price-per-base" readonly disabled style="background-color: #e9ecef;">
+                                            </div>
+                                            <div class="col-md-1 d-flex align-items-end">
+                                                <div class="form-check me-2">
+                                                    <input type="checkbox" name="unit_default[]" value="1" class="form-check-input" id="default_unit_1" checked>
+                                                    <label class="form-check-label small" for="default_unit_1">Default</label>
+                                                </div>
+                                                <button type="button" class="btn btn-danger btn-sm remove-unit-btn" disabled>
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="row mt-2">
+                                            <div class="col-md-12">
+                                                <div class="btn-group btn-group-sm" role="group">
+                                                    <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.9">10% off</button>
+                                                    <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.95">5% off</button>
+                                                    <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.0">Base price</button>
+                                                    <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.05">+5%</button>
+                                                    <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.10">+10%</button>
+                                                </div>
+                                                <small class="text-muted ms-2">Quick price adjustments</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <button type="button" class="btn btn-outline-primary btn-sm mt-2" id="addUnitBtn">
+                                    <i class="fas fa-plus"></i> Add Another Unit (Carton, Packet, etc.)
+                                </button>
+                                
+                                <div class="alert alert-info small mt-3">
+                                    <i class="fas fa-lightbulb"></i> <strong>How it works:</strong><br>
+                                    - <strong>Cost price</strong> is automatically calculated from the base unit cost<br>
+                                    - <strong>Selling price</strong> can be edited manually or auto-calculated using the buttons<br>
+                                    - The <strong>base unit</strong> is the smallest unit (e.g., piece, gram, ml)<br>
+                                    - Example: If base unit = piece (UGX 1,000), a carton of 50 pieces will have cost = UGX 50,000
                                 </div>
                             </div>
                         </div>
@@ -156,7 +267,7 @@
                                     </div>
                                     <div class="col-md-6">
                                         <div class="mb-3">
-                                            <label class="form-label fw-semibold">Initial Quantity *</label>
+                                            <label class="form-label fw-semibold">Initial Stock (in base units) *</label>
                                             <div class="input-group">
                                                 <span class="input-group-text bg-light">
                                                     <i class="fas fa-boxes text-primary"></i>
@@ -166,15 +277,18 @@
                                                        class="form-control" 
                                                        value="{{ form_data.quantity|default:'0' }}" 
                                                        min="0" 
+                                                       step="1"
                                                        placeholder="0"
                                                        required>
+                                                <span class="input-group-text bg-light" id="baseUnitLabel">units</span>
                                             </div>
+                                            <div class="form-text">Enter stock in base units (e.g., pieces)</div>
                                         </div>
                                     </div>
                                 </div>
 
                                 <div class="mb-3">
-                                    <label class="form-label fw-semibold">Reorder Level</label>
+                                    <label class="form-label fw-semibold">Reorder Level (in base units)</label>
                                     <div class="input-group">
                                         <span class="input-group-text bg-light">
                                             <i class="fas fa-bell text-primary"></i>
@@ -182,9 +296,10 @@
                                         <input type="number" 
                                                name="reorder_level" 
                                                class="form-control" 
-                                               value="{{ form_data.reorder_level|default:'10' }}" 
+                                               value="{{ form_data.reorder_level|default:'100' }}" 
                                                min="0"
-                                               placeholder="10">
+                                               placeholder="100">
+                                        <span class="input-group-text bg-light">base units</span>
                                     </div>
                                     <div class="form-text">Get notified when stock falls below this level</div>
                                 </div>
@@ -207,7 +322,6 @@
                     </form>
                 </div>
                 
-                <!-- Card Footer -->
                 <div class="card-footer bg-light py-3">
                     <div class="row">
                         <div class="col-md-12">
@@ -265,24 +379,315 @@
 .card-footer {
     border-top: 1px solid rgba(0,0,0,0.05);
 }
+
+.unit-row {
+    background-color: #f8f9fa;
+    transition: all 0.2s ease;
+}
+
+.unit-row:hover {
+    background-color: #e9ecef;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.unit-cost-price, .price-per-base {
+    background-color: #e9ecef !important;
+}
+
+.btn-sm .fas {
+    font-size: 0.875rem;
+}
+
+.auto-price-btn {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.auto-price-btn:hover {
+    background-color: #0d6efd;
+    color: white;
+    border-color: #0d6efd;
+}
 </style>
 
 <script>
-// Basic form validation
-(function() {
-    'use strict';
-    window.addEventListener('load', function() {
-        var forms = document.getElementsByClassName('needs-validation');
-        var validation = Array.prototype.filter.call(forms, function(form) {
-            form.addEventListener('submit', function(event) {
-                if (form.checkValidity() === false) {
-                    event.preventDefault();
-                    event.stopPropagation();
+document.addEventListener('DOMContentLoaded', function() {
+    let unitCounter = 1;
+    const unitsContainer = document.getElementById('unitsContainer');
+    const addUnitBtn = document.getElementById('addUnitBtn');
+    const baseUnitSelect = document.getElementById('baseUnit');
+    const baseUnitLabel = document.getElementById('baseUnitLabel');
+    const baseCostPrice = document.getElementById('costPrice');
+    const baseSellingPrice = document.getElementById('baseSellingPrice');
+    
+    // Update base unit label
+    function updateBaseUnitLabel() {
+        const selected = baseUnitSelect.options[baseUnitSelect.selectedIndex];
+        if (selected && selected.value) {
+            const unitText = selected.text.split('(')[0].trim();
+            baseUnitLabel.textContent = unitText.toLowerCase();
+            // Update all unit rows' help text
+            document.querySelectorAll('.unit-quantity').forEach(input => {
+                const helpText = input.closest('.col-md-2')?.querySelector('small');
+                if (helpText) {
+                    helpText.innerHTML = `= X ${unitText.toLowerCase()}s`;
                 }
-                form.classList.add('was-validated');
-            }, false);
+            });
+        }
+    }
+    
+    baseUnitSelect.addEventListener('change', updateBaseUnitLabel);
+    updateBaseUnitLabel();
+    
+    // Function to recalculate cost price for a unit
+    function recalculateCostPrice(row) {
+        const quantityInput = row.querySelector('.unit-quantity');
+        const costPriceField = row.querySelector('.unit-cost-price');
+        
+        if (quantityInput && costPriceField) {
+            const quantity = parseFloat(quantityInput.value) || 0;
+            const baseCost = parseFloat(baseCostPrice.value) || 0;
+            const calculatedCost = baseCost * quantity;
+            costPriceField.value = calculatedCost.toFixed(2);
+        }
+    }
+    
+    // Function to recalculate selling price per base unit
+    function recalculatePricePerBase(row) {
+        const quantityInput = row.querySelector('.unit-quantity');
+        const sellingPriceInput = row.querySelector('.unit-selling-price');
+        const pricePerBaseField = row.querySelector('.price-per-base');
+        
+        if (quantityInput && sellingPriceInput && pricePerBaseField) {
+            const quantity = parseFloat(quantityInput.value) || 0;
+            const sellingPrice = parseFloat(sellingPriceInput.value) || 0;
+            if (quantity > 0) {
+                pricePerBaseField.value = (sellingPrice / quantity).toFixed(2);
+            } else {
+                pricePerBaseField.value = '';
+            }
+        }
+    }
+    
+    // Function to auto-calculate selling price based on multiplier
+    function autoCalculateSellingPrice(row, multiplier) {
+        const quantityInput = row.querySelector('.unit-quantity');
+        const sellingPriceInput = row.querySelector('.unit-selling-price');
+        
+        if (quantityInput && sellingPriceInput) {
+            const quantity = parseFloat(quantityInput.value) || 0;
+            const basePrice = parseFloat(baseSellingPrice.value) || 0;
+            const calculatedPrice = basePrice * quantity * multiplier;
+            sellingPriceInput.value = calculatedPrice.toFixed(2);
+            recalculatePricePerBase(row);
+        }
+    }
+    
+    // Update all units when base cost price changes
+    function updateAllCostPrices() {
+        document.querySelectorAll('.unit-row').forEach(row => {
+            recalculateCostPrice(row);
         });
-    }, false);
-})();
+    }
+    
+    // Update all units when base selling price changes
+    function updateAllSellingPrices() {
+        document.querySelectorAll('.unit-row').forEach(row => {
+            const sellingPriceInput = row.querySelector('.unit-selling-price');
+            if (sellingPriceInput && !sellingPriceInput.hasAttribute('data-manual-edited')) {
+                const quantityInput = row.querySelector('.unit-quantity');
+                const quantity = parseFloat(quantityInput?.value) || 0;
+                const basePrice = parseFloat(baseSellingPrice.value) || 0;
+                sellingPriceInput.value = (basePrice * quantity).toFixed(2);
+                recalculatePricePerBase(row);
+            }
+        });
+    }
+    
+    // Listen to base cost price changes
+    if (baseCostPrice) {
+        baseCostPrice.addEventListener('input', function() {
+            updateAllCostPrices();
+        });
+    }
+    
+    // Listen to base selling price changes
+    if (baseSellingPrice) {
+        baseSellingPrice.addEventListener('input', function() {
+            updateAllSellingPrices();
+        });
+    }
+    
+    // Setup event listeners for a row
+    function setupRowEvents(row, isFirstRow = false) {
+        const quantityInput = row.querySelector('.unit-quantity');
+        const sellingPriceInput = row.querySelector('.unit-selling-price');
+        const removeBtn = row.querySelector('.remove-unit-btn');
+        
+        if (quantityInput) {
+            quantityInput.addEventListener('input', function() {
+                recalculateCostPrice(row);
+                recalculatePricePerBase(row);
+                if (sellingPriceInput) {
+                    sellingPriceInput.removeAttribute('data-manual-edited');
+                }
+            });
+        }
+        
+        if (sellingPriceInput) {
+            sellingPriceInput.addEventListener('input', function() {
+                this.setAttribute('data-manual-edited', 'true');
+                recalculatePricePerBase(row);
+            });
+        }
+        
+        // Auto-price buttons
+        const autoPriceBtns = row.querySelectorAll('.auto-price-btn');
+        autoPriceBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                const multiplier = parseFloat(this.dataset.multiplier);
+                autoCalculateSellingPrice(row, multiplier);
+                if (sellingPriceInput) {
+                    sellingPriceInput.setAttribute('data-manual-edited', 'true');
+                }
+            });
+        });
+        
+        // Remove button
+        if (removeBtn && !isFirstRow) {
+            removeBtn.addEventListener('click', function() {
+                row.remove();
+            });
+        }
+        
+        // Initial calculations
+        recalculateCostPrice(row);
+        recalculatePricePerBase(row);
+    }
+    
+    // Add new unit row
+    function addUnitRow() {
+        unitCounter++;
+        const baseUnitText = baseUnitSelect.options[baseUnitSelect.selectedIndex]?.text.split('(')[0].trim() || 'base';
+        
+        const newRow = document.createElement('div');
+        newRow.className = 'unit-row mb-3 p-3 border rounded';
+        newRow.innerHTML = `
+            <div class="row align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label">Unit Name *</label>
+                    <select name="unit_name[]" class="form-control unit-name-select" required>
+                        <option value="">Select unit type...</option>
+                        <option value="piece">Piece (pc)</option>
+                        <option value="packet">Packet (pkt)</option>
+                        <option value="carton">Carton (ctn)</option>
+                        <option value="box">Box (box)</option>
+                        <option value="dozen">Dozen (doz)</option>
+                        <option value="gross">Gross (gr)</option>
+                        <option value="roll">Roll (roll)</option>
+                        <option value="bundle">Bundle (bdl)</option>
+                        <option value="set">Set (set)</option>
+                        <option value="pair">Pair (pr)</option>
+                        <option value="bag">Bag (bag)</option>
+                        <option value="bottle">Bottle (btl)</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Quantity in Base *</label>
+                    <input type="number" step="0.01" name="unit_quantity[]" class="form-control unit-quantity" placeholder="e.g., 50" required>
+                    <small class="text-muted">= X ${baseUnitText}s</small>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Cost Price (UGX)</label>
+                    <input type="text" class="form-control unit-cost-price" readonly disabled style="background-color: #e9ecef;">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Selling Price (UGX) *</label>
+                    <input type="number" step="0.01" name="unit_price[]" class="form-control unit-selling-price" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Price per Base Unit</label>
+                    <input type="text" class="form-control price-per-base" readonly disabled style="background-color: #e9ecef;">
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                    <div class="form-check me-2">
+                        <input type="checkbox" name="unit_default[]" value="${unitCounter}" class="form-check-input" id="default_${unitCounter}">
+                        <label class="form-check-label small" for="default_${unitCounter}">Default</label>
+                    </div>
+                    <button type="button" class="btn btn-danger btn-sm remove-unit-btn">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-12">
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.9">10% off</button>
+                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.95">5% off</button>
+                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.0">Base price</button>
+                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.05">+5%</button>
+                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.10">+10%</button>
+                    </div>
+                    <small class="text-muted ms-2">Quick price adjustments</small>
+                </div>
+            </div>
+        `;
+        
+        unitsContainer.appendChild(newRow);
+        setupRowEvents(newRow, false);
+        
+        // Auto-calculate based on current base prices
+        const quantityInput = newRow.querySelector('.unit-quantity');
+        const sellingPriceInput = newRow.querySelector('.unit-selling-price');
+        
+        if (quantityInput && sellingPriceInput) {
+            quantityInput.value = 1;
+            const basePrice = parseFloat(baseSellingPrice.value) || 0;
+            sellingPriceInput.value = (basePrice * 1).toFixed(2);
+            recalculateCostPrice(newRow);
+            recalculatePricePerBase(newRow);
+        }
+    }
+    
+    // Add unit button click
+    addUnitBtn.addEventListener('click', addUnitRow);
+    
+    // Setup existing rows
+    const existingRows = document.querySelectorAll('.unit-row');
+    existingRows.forEach((row, index) => {
+        setupRowEvents(row, index === 0);
+    });
+    
+    // Form validation
+    const form = document.getElementById('productForm');
+    form.addEventListener('submit', function(e) {
+        const unitRows = document.querySelectorAll('.unit-row');
+        let hasValidUnits = false;
+        
+        unitRows.forEach(row => {
+            const unitName = row.querySelector('.unit-name-select').value;
+            const unitQuantity = row.querySelector('.unit-quantity').value;
+            const unitPrice = row.querySelector('.unit-selling-price').value;
+            
+            if (unitName && unitQuantity && unitPrice) {
+                hasValidUnits = true;
+            }
+        });
+        
+        if (!hasValidUnits) {
+            e.preventDefault();
+            alert('Please add at least one valid unit of measure with quantity and price.');
+        }
+        
+        // Ensure at least one default unit is selected
+        const defaultCheckboxes = document.querySelectorAll('input[name="unit_default[]"]:checked');
+        if (defaultCheckboxes.length === 0 && unitRows.length > 0) {
+            const firstCheckbox = document.querySelector('input[name="unit_default[]"]');
+            if (firstCheckbox) {
+                firstCheckbox.checked = true;
+            }
+        }
+    });
+});
 </script>
 {% endblock %}

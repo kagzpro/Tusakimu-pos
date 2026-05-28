@@ -267,3 +267,37 @@ def set_language(request):
         translation.activate(lang)
         return response
     return redirect('/')
+
+
+# core/views.py
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.contrib.auth.decorators import user_passes_test
+from .models import ExchangeRate
+from .forms import ExchangeRateForm
+
+# Only superusers can access
+@user_passes_test(lambda u: u.is_superuser)
+def edit_exchange_rate(request):
+    try:
+        exchange_rate = ExchangeRate.objects.latest('updated_at')
+    except ExchangeRate.DoesNotExist:
+        exchange_rate = None
+
+    if request.method == "POST":
+        form = ExchangeRateForm(request.POST, instance=exchange_rate)
+        if form.is_valid():
+            new_rate = form.save(commit=False)
+            new_rate.updated_by = request.user
+            new_rate.save()
+            messages.success(request, f"Exchange rate updated to {new_rate.rate}")
+            return redirect("core:edit_exchange_rate")
+        else:
+            messages.error(request, "Please correct the errors below.")
+    else:
+        form = ExchangeRateForm(instance=exchange_rate)
+
+    return render(request, "core/edit_exchange_rate.html", {
+        "form": form,
+        "current_rate": exchange_rate.rate if exchange_rate else None
+    })

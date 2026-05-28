@@ -19,10 +19,10 @@
         </div>
         <div class="d-flex gap-2">
             {% if batch.status == 'pending' %}
-                <a href="{% url 'inventory:confirm_transfer' batch.id %}" class="btn btn-success">
+                <a href="{% url 'inventory:confirm_transfer' batch.id %}" class="btn btn-success" onclick="return confirm('Confirm this transfer? Stock will be moved immediately.')">
                     <i class="fas fa-check-circle me-1"></i>Confirm Transfer
                 </a>
-                <a href="{% url 'inventory:cancel_transfer' batch.id %}" class="btn btn-danger">
+                <a href="{% url 'inventory:cancel_transfer' batch.id %}" class="btn btn-danger" onclick="return confirm('Cancel this transfer?')">
                     <i class="fas fa-times-circle me-1"></i>Cancel Transfer
                 </a>
             {% endif %}
@@ -162,7 +162,7 @@
                 </div>
             </div>
 
-            <!-- Transfer Items -->
+            <!-- Transfer Items with Units -->
             <div class="card">
                 <div class="card-header bg-dark text-white">
                     <h5 class="card-title mb-0">
@@ -176,7 +176,9 @@
                                 <tr>
                                     <th class="ps-3">Product</th>
                                     <th>SKU</th>
-                                    <th class="text-center">Quantity</th>
+                                    <th>Unit</th>
+                                    <th class="text-center">Quantity (in Unit)</th>
+                                    <th class="text-center">Base Quantity</th>
                                     <th>Status</th>
                                     <th class="text-center">Transferred By</th>
                                 </tr>
@@ -191,8 +193,10 @@
                                             </div>
                                             <div class="flex-grow-1 ms-2">
                                                 <strong class="text-white">{{ item.product.name }}</strong>
+                                                <div class="small text-muted">
+                                                    Base Unit: {{ item.product.base_unit|default:"piece" }}
+                                                </div>
                                                 {% if item.product.category %}
-                                                    <br>
                                                     <small class="text-muted">{{ item.product.category.name }}</small>
                                                 {% endif %}
                                             </div>
@@ -201,8 +205,43 @@
                                     <td>
                                         <code class="text-info">{{ item.product.sku|default:"No SKU" }}</code>
                                     </td>
+                                    <td class="unit-cell">
+                                        {% if item.unit_name %}
+                                            <span class="badge bg-info">
+                                                <i class="fas fa-balance-scale me-1"></i>
+                                                {{ item.unit_name|title }}
+                                            </span>
+                                            <div class="small text-muted mt-1">
+                                                1 {{ item.unit_name }} = 
+                                                {% with unit=item.product.units.all|first %}
+                                                    {% if unit %}
+                                                        {{ unit.quantity_in_base }}
+                                                    {% else %}
+                                                        1
+                                                    {% endif %}
+                                                {% endwith %}
+                                                {{ item.product.base_unit }}s
+                                            </div>
+                                        {% else %}
+                                            <span class="badge bg-secondary">
+                                                {{ item.product.base_unit|default:"piece"|title }}
+                                            </span>
+                                        {% endif %}
+                                    </td>
                                     <td class="text-center">
-                                        <span class="badge bg-primary fs-6">{{ item.quantity }}</span>
+                                        <span class="badge bg-primary fs-6">
+                                            {{ item.quantity }}
+                                            {% if item.unit_name %}
+                                                {{ item.unit_name }}
+                                            {% else %}
+                                                {{ item.product.base_unit }}s
+                                            {% endif %}
+                                        </span>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge bg-secondary">
+                                            {{ item.base_quantity|default:item.quantity }} {{ item.product.base_unit }}s
+                                        </span>
                                     </td>
                                     <td>
                                         {% if item.status == 'completed' %}
@@ -231,7 +270,7 @@
                                 </tr>
                                 {% empty %}
                                 <tr>
-                                    <td colspan="5" class="text-center py-4">
+                                    <td colspan="7" class="text-center py-4">
                                         <i class="fas fa-box-open fa-3x text-muted mb-3"></i>
                                         <h5 class="text-muted">No Items in Transfer</h5>
                                         <p class="text-muted">This transfer doesn't contain any products.</p>
@@ -242,11 +281,19 @@
                             {% if transfer_items %}
                             <tfoot class="table-light" style="background: #1e293b;">
                                 <tr>
-                                    <td colspan="2" class="text-end fw-bold text-white">Total Quantity:</td>
+                                    <td colspan="3" class="text-end fw-bold text-white">Total:</td>
                                     <td class="text-center fw-bold">
-                                        <span class="badge bg-success fs-6">
-                                            {{ transfer_items|length }} items, 
-                                            {{ transfer_items|length|default:0 }} total units
+                                        <span class="badge bg-success">
+                                            {% with total_quantity=transfer_items|length %}
+                                                {{ total_quantity }} items
+                                            {% endwith %}
+                                        </span>
+                                    </td>
+                                    <td class="text-center fw-bold">
+                                        <span class="badge bg-info">
+                                            {% with total_base=transfer_items|length %}
+                                                {{ total_base }} base units
+                                            {% endwith %}
                                         </span>
                                     </td>
                                     <td colspan="2"></td>
@@ -283,41 +330,36 @@
                                         {{ total_quantity }}
                                     {% endwith %}
                                 </h3>
-                                <small class="text-muted">Total Units</small>
+                                <small class="text-muted">Products</small>
                             </div>
                         </div>
                     </div>
                     
                     <div class="mt-3">
-                        <h6 class="text-white mb-2">Transfer Timeline</h6>
-                        <div class="timeline">
-                            <div class="timeline-item {% if batch.created_at %}active{% endif %}">
-                                <div class="timeline-marker bg-primary"></div>
-                                <div class="timeline-content">
-                                    <small class="text-muted">Created</small>
-                                    <br>
-                                    <small class="text-white">{{ batch.created_at|date:"M j, Y H:i" }}</small>
-                                </div>
-                            </div>
-                            {% if batch.status == 'confirmed' %}
-                            <div class="timeline-item active">
-                                <div class="timeline-marker bg-success"></div>
-                                <div class="timeline-content">
-                                    <small class="text-muted">Confirmed</small>
-                                    <br>
-                                    <small class="text-white">{{ batch.updated_at|date:"M j, Y H:i" }}</small>
-                                </div>
-                            </div>
-                            {% elif batch.status == 'cancelled' %}
-                            <div class="timeline-item">
-                                <div class="timeline-marker bg-danger"></div>
-                                <div class="timeline-content">
-                                    <small class="text-muted">Cancelled</small>
-                                    <br>
-                                    <small class="text-white">{{ batch.updated_at|date:"M j, Y H:i" }}</small>
-                                </div>
-                            </div>
-                            {% endif %}
+                        <h6 class="text-white mb-2">Unit Summary</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr class="text-muted">
+                                        <th>Product</th>
+                                        <th>Unit</th>
+                                        <th>Qty</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in transfer_items|slice:":5" %}
+                                    <tr>
+                                        <td class="text-white small">{{ item.product.name|truncatechars:20 }}</td>
+                                        <td>
+                                            <span class="badge bg-info bg-opacity-25">
+                                                {{ item.unit_name|default:item.product.base_unit }}
+                                            </span>
+                                        </td>
+                                        <td class="text-center">{{ item.quantity }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -333,10 +375,10 @@
                 <div class="card-body">
                     <div class="d-grid gap-2">
                         {% if batch.status == 'pending' %}
-                            <a href="{% url 'inventory:confirm_transfer' batch.id %}" class="btn btn-success btn-lg">
+                            <a href="{% url 'inventory:confirm_transfer' batch.id %}" class="btn btn-success btn-lg" onclick="return confirm('Confirm this transfer? Stock will be moved immediately.')">
                                 <i class="fas fa-check-circle me-2"></i>Confirm Transfer
                             </a>
-                            <a href="{% url 'inventory:cancel_transfer' batch.id %}" class="btn btn-danger btn-lg">
+                            <a href="{% url 'inventory:cancel_transfer' batch.id %}" class="btn btn-danger btn-lg" onclick="return confirm('Cancel this transfer?')">
                                 <i class="fas fa-times-circle me-2"></i>Cancel Transfer
                             </a>
                         {% endif %}
@@ -397,6 +439,12 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <div class="mt-3 pt-2 border-top border-secondary">
+                        <div class="text-center">
+                            <small class="text-muted">Transferring in units of measure</small>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -407,7 +455,7 @@
 :root {
     --bg: #071029;
     --card: #0e1622;
-    --muted: #cfd3ea;   /* made text much brighter */
+    --muted: #cfd3ea;
     --accent: #6366f1;
     --accent2: #22d3ee;
     --positive: #22c55e;
@@ -459,10 +507,6 @@ body {
     text-decoration: none;
 }
 
-.breadcrumb-item.active {
-    color: rgb(56, 28, 28);
-}
-
 .alert {
     border: none;
     border-radius: 8px;
@@ -481,48 +525,6 @@ body {
 .alert-danger {
     background: #450a0a;
     border-left: 4px solid var(--negative);
-}
-
-.timeline {
-    position: relative;
-    padding-left: 20px;
-}
-
-.timeline::before {
-    content: '';
-    position: absolute;
-    left: 8px;
-    top: 0;
-    bottom: 0;
-    width: 2px;
-    background: #374151;
-}
-
-.timeline-item {
-    position: relative;
-    margin-bottom: 15px;
-}
-
-.timeline-marker {
-    position: absolute;
-    left: -20px;
-    top: 5px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    border: 2px solid var(--card);
-}
-
-.timeline-content {
-    margin-left: 0;
-}
-
-.timeline-item.active .timeline-marker {
-    box-shadow: 0 0 0 2px var(--card);
-}
-
-.bg-opacity-10 {
-    background-color: rgba(var(--bs-primary-rgb), 0.1) !important;
 }
 
 .btn {
@@ -557,6 +559,14 @@ code {
     font-size: 0.875em;
 }
 
+.unit-cell {
+    min-width: 100px;
+}
+
+.bg-opacity-25 {
+    background-color: rgba(13, 202, 240, 0.25) !important;
+}
+
 /* Print Styles */
 @media print {
     .btn, .breadcrumb, .alert {
@@ -565,7 +575,7 @@ code {
     
     .card {
         border: 1px solid #000 !important;
-        background: rgb(255, 255, 255) !important;
+        background: white !important;
         color: black !important;
     }
     

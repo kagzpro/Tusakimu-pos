@@ -37,7 +37,7 @@
                         </tr>
                         <tr>
                             <th class="bg-light">Total Quantity:</th>
-                            <td><span class="badge bg-info">{{ batch.get_total_quantity }}</span></td>
+                            <td><span class="badge bg-info">{{ batch.get_total_quantity }}</span></span></td>
                         </tr>
                         <tr>
                             <th class="bg-light">Created By:</th>
@@ -45,7 +45,7 @@
                         </tr>
                         <tr>
                             <th class="bg-light">Created Date:</th>
-                            <td>{{ batch.created_at|date:"M d, Y H:i" }}</td>
+                            <td>{{ batch.created_at|date:"M d, Y H:i" }}</span></td>
                         </tr>
                     </table>
                 </div>
@@ -58,7 +58,9 @@
                         <tr>
                             <th>Product</th>
                             <th>SKU</th>
-                            <th>Quantity</th>
+                            <th>Unit</th>
+                            <th>Quantity (in Unit)</th>
+                            <th>Base Quantity</th>
                             <th>Current Stock (From)</th>
                             <th>After Transfer</th>
                             <th>Status</th>
@@ -67,30 +69,76 @@
                     <tbody>
                         {% for item in transfer_items %}
                         <tr>
-                            <td>{{ item.product.name }}</td>
-                            <td>{{ item.product.sku|default:"N/A" }}</td>
-                            <td><span class="badge bg-primary">{{ item.quantity }}</span></td>
                             <td>
-                                {% with item.get_from_stock as from_stock %}
-                                    {{ from_stock|default:0 }}
-                                {% endwith %}
-                            </td>
+                                {{ item.product.name }}
+                                <br>
+                                <small class="text-muted">{{ item.product.base_unit|default:"piece" }} base unit</small>
+                            </span></td>
+                            <td>{{ item.product.sku|default:"N/A" }}</code></td>
                             <td>
-                                {% with item.get_from_stock as from_stock %}
-                                    {% if from_stock %}
-                                        {{ from_stock|add:item.quantity }}
+                                {% if item.unit_name %}
+                                    <span class="badge bg-info">
+                                        <i class="fas fa-balance-scale me-1"></i>
+                                        {{ item.unit_name|title }}
+                                    </span>
+                                    <br>
+                                    <small class="text-muted">
+                                        1 {{ item.unit_name }} = 
+                                        {% with unit=item.product.units.all|first %}
+                                            {% if unit %}
+                                                {{ unit.quantity_in_base }}
+                                            {% else %}
+                                                1
+                                            {% endif %}
+                                        {% endwith %}
+                                        {{ item.product.base_unit }}s
+                                    </small>
+                                {% else %}
+                                    <span class="badge bg-secondary">
+                                        {{ item.product.base_unit|default:"piece"|title }}
+                                    </span>
+                                {% endif %}
+                             </span></td>
+                            <td>
+                                <span class="badge bg-primary">
+                                    {{ item.quantity }}
+                                    {% if item.unit_name %}
+                                        {{ item.unit_name }}
                                     {% else %}
-                                        {{ item.quantity }}
+                                        {{ item.product.base_unit }}s
                                     {% endif %}
-                                {% endwith %}
-                            </td>
+                                </span>
+                             </span></td>
                             <td>
-                                <span class="badge bg-warning">{{ item.status }}</span>
-                            </td>
+                                <span class="badge bg-secondary">
+                                    {{ item.base_quantity|default:item.quantity }} {{ item.product.base_unit }}s
+                                </span>
+                             </span></td>
+                            <td>
+                                {% with item.get_from_stock as from_stock %}
+                                    <span class="badge {% if from_stock < item.base_quantity %}bg-danger{% else %}bg-info{% endif %}">
+                                        {{ from_stock|default:0 }} {{ item.product.base_unit }}s
+                                    </span>
+                                {% endwith %}
+                             </span></td>
+                            <td>
+                                {% with item.get_from_stock as from_stock %}
+                                    <span class="badge bg-success">
+                                        {% if from_stock %}
+                                            {{ from_stock|add:item.base_quantity }} {{ item.product.base_unit }}s
+                                        {% else %}
+                                            {{ item.base_quantity }} {{ item.product.base_unit }}s
+                                        {% endif %}
+                                    </span>
+                                {% endwith %}
+                             </span></td>
+                            <td>
+                                <span class="badge bg-warning">{{ item.status|title }}</span>
+                             </span></td>
                         </tr>
                         {% endfor %}
                     </tbody>
-                </table>
+                 </span>
             </div>
 
             <form method="post">
@@ -118,4 +166,22 @@
         </div>
     </div>
 </div>
+
+<style>
+.badge {
+    font-size: 0.8rem;
+    padding: 0.4rem 0.6rem;
+}
+.table th {
+    background-color: #f8f9fa;
+}
+.alert-warning {
+    background-color: #fff3cd;
+    border-left: 4px solid #ffc107;
+}
+.alert-info {
+    background-color: #d1ecf1;
+    border-left: 4px solid #17a2b8;
+}
+</style>
 {% endblock %}

@@ -23,7 +23,7 @@ urlpatterns = [
     path('users/<int:user_id>/detail/', views.user_detail, name='user_detail'),
     path('users/permissions/', views.user_permissions, name='user_permissions'),
     path('users/<int:user_id>/edit-permissions/', views.edit_user_permissions, name='edit_user_permissions'),
-
+    path("edit-exchange-rate/", views.edit_exchange_rate, name="edit_exchange_rate"),
     # ------------------------------
     # Profile
     # ------------------------------

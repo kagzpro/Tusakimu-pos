@@ -14,26 +14,8 @@ def main():
             "available on your PYTHONPATH environment variable? Did you "
             "forget to activate a virtual environment?"
         ) from exc
-
-    # ----------------- AUTO CREATE SUPERUSER SNIPPET -----------------
-    if 'createsuperuser' in sys.argv:
-        import django
-        django.setup()
-        from django.contrib.auth import get_user_model
-
-        User = get_user_model()
-        if not User.objects.filter(username="admin").exists():
-            print("Creating superuser...")
-            User.objects.create_superuser(
-                username="kagga",
-                email="kaggaronald1@gmail.com",
-                password="karon1294"
-            )
-        else:
-            print("Superuser already exists")
-        sys.exit()
-    # ------------------------------------------------------------------
-
+    
+    # Run migrations first, then create superuser
     execute_from_command_line(sys.argv)
 
 if __name__ == '__main__':

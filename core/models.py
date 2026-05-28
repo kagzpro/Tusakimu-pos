@@ -78,3 +78,15 @@ def create_user_profile(sender, instance, created, **kwargs):
 def save_user_profile(sender, instance, **kwargs):
     if hasattr(instance, 'profile'):
         instance.profile.save()
+
+# core/models.py
+from django.db import models
+from django.contrib.auth.models import User
+
+class ExchangeRate(models.Model):
+    rate = models.DecimalField(max_digits=12, decimal_places=4, default=0.005)  # CDF → UGX
+    updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"1 CDF = {self.rate} UGX"

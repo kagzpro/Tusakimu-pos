@@ -1,0 +1,21 @@
+<!-- templates/core/edit_exchange_rate.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Edit Exchange Rate</h2>
+
+    {% if current_rate %}
+        <p>Current exchange rate: <strong>{{ current_rate }}</strong> CDF → UGX</p>
+    {% else %}
+        <p>No exchange rate set yet.</p>
+    {% endif %}
+
+    <form method="POST" class="mt-3">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="btn btn-primary">Update Rate</button>
+    </form>
+</div>
+{% endblock %}
+

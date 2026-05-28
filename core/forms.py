@@ -109,3 +109,19 @@ class LocationForm(forms.ModelForm):
             'phone': forms.TextInput(attrs={'class': 'form-control'}),
             'email': forms.EmailInput(attrs={'class': 'form-control'}),
         }
+
+
+# core/forms.py
+from django import forms
+from .models import ExchangeRate
+
+class ExchangeRateForm(forms.ModelForm):
+    class Meta:
+        model = ExchangeRate
+        fields = ['rate']
+        widgets = {
+            'rate': forms.NumberInput(attrs={'step': '0.0001', 'min': '0'}),
+        }
+        labels = {
+            'rate': 'Exchange Rate (CDF → UGX)',
+        }

@@ -1,4 +1,8 @@
 <!-- inventory/templates/inventory/import_products.html -->
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
 <div class="container-fluid py-4">
     <!-- Header Section -->
     <div class="row mb-4">
@@ -9,7 +13,7 @@
                         <h1 class="h3 mb-1 text-white">
                             <i class="fas fa-file-import me-2"></i>Product Import
                         </h1>
-                        <p class="mb-0 text-white-50">Bulk import products with multi-location stock management</p>
+                        <p class="mb-0 text-white-50">Bulk import products with multi-location stock management and units of measure</p>
                     </div>
                     <div class="flex-shrink-0">
                         <span class="badge bg-light text-primary fs-6">CSV Import</span>
@@ -134,6 +138,8 @@
                                         <th class="border-0">Status</th>
                                         <th class="border-0">Product Name</th>
                                         <th class="border-0">SKU</th>
+                                        <th class="border-0">Base Unit</th>
+                                        <th class="border-0">Units</th>
                                         <th class="border-0">Stock Locations</th>
                                     </tr>
                                 </thead>
@@ -145,9 +151,25 @@
                                                 <i class="fas {% if item.type == 'imported' %}fa-plus{% else %}fa-sync{% endif %} me-1"></i>
                                                 {{ item.type|title }}
                                             </span>
-                                        </td>
-                                        <td class="fw-semibold text-dark">{{ item.name }}</td>
-                                        <td><code class="text-primary">{{ item.sku }}</code></td>
+                                        </span></td>
+                                        <td class="fw-semibold text-dark">{{ item.name }}</span></td>
+                                        <td><code class="text-primary">{{ item.sku }}</code></span></td>
+                                        <td>
+                                            <span class="badge bg-info">{{ item.base_unit|default:"piece" }}</span>
+                                        </span></td>
+                                        <td>
+                                            {% if item.units %}
+                                                <div class="d-flex flex-wrap gap-1">
+                                                    {% for unit in item.units %}
+                                                    <span class="badge bg-secondary bg-opacity-10 text-dark border rounded-pill">
+                                                        <i class="fas fa-balance-scale me-1 text-info"></i>{{ unit }}
+                                                    </span>
+                                                    {% endfor %}
+                                                </div>
+                                            {% else %}
+                                                <span class="text-muted fst-italic">No units</span>
+                                            {% endif %}
+                                        </span></td>
                                         <td>
                                             {% if item.locations %}
                                                 <div class="d-flex flex-wrap gap-1">
@@ -160,11 +182,24 @@
                                             {% else %}
                                                 <span class="text-muted fst-italic">No stock assigned</span>
                                             {% endif %}
-                                        </td>
+                                        </span></td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Unit Import Summary -->
+                    {% if import_results.units_imported %}
+                    <div class="alert alert-info border-0 shadow-sm mb-3">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-balance-scale text-info me-2 fs-4"></i>
+                            <div>
+                                <strong class="text-dark">Units Imported:</strong>
+                                <span class="text-muted">{{ import_results.units_imported }} unit records processed</span>
+                            </div>
                         </div>
                     </div>
                     {% endif %}
@@ -243,17 +278,52 @@
                                 <span class="badge bg-primary rounded-pill">Name</span>
                                 <span class="badge bg-primary rounded-pill">SKU</span>
                                 <span class="badge bg-primary rounded-pill">Category</span>
+                                <span class="badge bg-primary rounded-pill">Base Unit</span>
                                 <span class="badge bg-primary rounded-pill">Cost Price</span>
                                 <span class="badge bg-primary rounded-pill">Selling Price</span>
                                 <span class="badge bg-primary rounded-pill">Reorder Level</span>
                             </div>
                             
+                            <p class="fw-semibold text-dark mb-2">Units Columns (Optional):</p>
+                            <div class="d-flex flex-wrap gap-1 mb-3">
+                                <span class="badge bg-success rounded-pill">Unit1_Name</span>
+                                <span class="badge bg-success rounded-pill">Unit1_QtyInBase</span>
+                                <span class="badge bg-success rounded-pill">Unit1_Price</span>
+                                <span class="badge bg-success rounded-pill">Unit2_Name</span>
+                                <span class="badge bg-success rounded-pill">Unit2_QtyInBase</span>
+                                <span class="badge bg-success rounded-pill">Unit2_Price</span>
+                            </div>
+                            
                             <p class="fw-semibold text-dark mb-2">Location Columns:</p>
                             <div class="d-flex flex-wrap gap-1">
-                                <span class="badge bg-success rounded-pill">Location1_Name</span>
-                                <span class="badge bg-success rounded-pill">Location1_Quantity</span>
-                                <span class="badge bg-success rounded-pill">Location2_Name</span>
-                                <span class="badge bg-success rounded-pill">Location2_Quantity</span>
+                                <span class="badge bg-warning rounded-pill text-dark">Location1_Name</span>
+                                <span class="badge bg-warning rounded-pill text-dark">Location1_Quantity</span>
+                                <span class="badge bg-warning rounded-pill text-dark">Location2_Name</span>
+                                <span class="badge bg-warning rounded-pill text-dark">Location2_Quantity</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Unit Examples -->
+                    <div class="alert alert-secondary border-0 mb-3">
+                        <h6 class="text-dark mb-2">
+                            <i class="fas fa-balance-scale me-2"></i>Unit Examples
+                        </h6>
+                        <div class="small">
+                            <div class="mb-2">
+                                <code>Unit1_Name: piece</code><br>
+                                <code>Unit1_QtyInBase: 1</code><br>
+                                <code>Unit1_Price: 25000</code>
+                            </div>
+                            <div class="mb-2">
+                                <code>Unit2_Name: packet</code><br>
+                                <code>Unit2_QtyInBase: 4</code><br>
+                                <code>Unit2_Price: 95000</code>
+                            </div>
+                            <div>
+                                <code>Unit3_Name: carton</code><br>
+                                <code>Unit3_QtyInBase: 48</code><br>
+                                <code>Unit3_Price: 1080000</code>
                             </div>
                         </div>
                     </div>
@@ -266,8 +336,10 @@
                         <ul class="list-unstyled mb-0 small">
                             <li class="mb-1">• Use the template for correct formatting</li>
                             <li class="mb-1">• SKU must be unique for each product</li>
+                            <li class="mb-1">• Base Unit is the smallest unit (piece, kg, liter)</li>
                             <li class="mb-1">• Location names must match exactly</li>
-                            <li class="mb-0">• Quantities should be whole numbers</li>
+                            <li class="mb-1">• Quantities should be whole numbers</li>
+                            <li class="mb-0">• Unit quantities are in base units (e.g., 1 carton = 50 pieces)</li>
                         </ul>
                     </div>
                 </div>
@@ -367,3 +439,4 @@ document.addEventListener('DOMContentLoaded', function() {
     background-color: rgba(13, 110, 253, 0.05);
 }
 </style>
+{% endblock %}

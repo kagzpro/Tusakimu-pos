@@ -88,7 +88,7 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between">
                         <div>
-                            <h4 class="mb-0">${{ total_revenue|floatformat:2 }}</h4>
+                            <h4 class="mb-0">UGX {{ total_revenue|floatformat:0 }}</h4>
                             <p class="mb-0">Total Revenue</p>
                         </div>
                         <div class="align-self-center">
@@ -103,7 +103,7 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between">
                         <div>
-                            <h4 class="mb-0">${{ total_profit|floatformat:2 }}</h4>
+                            <h4 class="mb-0">UGX {{ total_profit|floatformat:0 }}</h4>
                             <p class="mb-0">Total Profit</p>
                         </div>
                         <div class="align-self-center">
@@ -134,7 +134,7 @@
                     <div class="d-flex justify-content-between">
                         <div>
                             <h4 class="mb-0">{{ total_quantity }}</h4>
-                            <p class="mb-0">Total Units Sold</p>
+                            <p class="mb-0">Total Base Units Sold</p>
                         </div>
                         <div class="align-self-center">
                             <i class="fas fa-cubes fa-2x"></i>
@@ -145,10 +145,10 @@
         </div>
     </div>
 
-    <!-- Products Sales Table -->
+    <!-- Products Sales Table with Units -->
     <div class="card">
         <div class="card-header bg-light d-flex justify-content-between align-items-center">
-            <h5 class="card-title mb-0">Product Performance</h5>
+            <h5 class="card-title mb-0">Product Performance by Unit</h5>
             <span class="badge bg-secondary">{{ product_sales|length }} products</span>
         </div>
         <div class="card-body">
@@ -159,10 +159,12 @@
                         <tr>
                             <th>Product</th>
                             <th>Category</th>
+                            <th>Base Unit</th>
                             <th class="text-center">Units Sold</th>
-                            <th class="text-end">Revenue</th>
-                            <th class="text-end">Cost</th>
-                            <th class="text-end">Profit</th>
+                            <th class="text-center">Units by Type</th>
+                            <th class="text-end">Revenue (UGX)</th>
+                            <th class="text-end">Cost (UGX)</th>
+                            <th class="text-end">Profit (UGX)</th>
                             <th class="text-center">Margin %</th>
                             <th class="text-center">Performance</th>
                         </tr>
@@ -184,29 +186,45 @@
                                         <small class="text-muted">{{ item.product.sku }}</small>
                                     </div>
                                 </div>
-                            </td>
+                            </span></td>
                             <td>
                                 <span class="badge bg-info">{{ item.product.category.name|default:"Uncategorized" }}</span>
-                            </td>
+                            </span></td>
+                            <td>
+                                <span class="badge bg-secondary">{{ item.product.base_unit|default:"piece" }}</span>
+                            </span></td>
                             <td class="text-center">
                                 <span class="fw-bold">{{ item.quantity }}</span>
-                            </td>
+                                <br>
+                                <small class="text-muted">{{ item.product.base_unit }}s</small>
+                            </span></span></td>
+                            <td class="text-center">
+                                {% if item.units_sold %}
+                                    {% for unit_name, unit_data in item.units_sold.items %}
+                                        <span class="badge bg-info m-1">
+                                            {{ unit_data.quantity }} {{ unit_name }}
+                                        </span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </span></td>
                             <td class="text-end">
-                                <strong>${{ item.revenue|floatformat:2 }}</strong>
-                            </td>
+                                <strong>UGX {{ item.revenue|floatformat:0 }}</strong>
+                            </span></span></td>
                             <td class="text-end">
-                                <span class="text-muted">${{ item.cost|floatformat:2 }}</span>
-                            </td>
+                                <span class="text-muted">UGX {{ item.cost|floatformat:0 }}</span>
+                            </span></span></td>
                             <td class="text-end">
                                 <strong class="{% if item.profit >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                    ${{ item.profit|floatformat:2 }}
+                                    UGX {{ item.profit|floatformat:0 }}
                                 </strong>
-                            </td>
+                            </span></span></td>
                             <td class="text-center">
                                 <span class="badge {% if item.margin >= 30 %}bg-success{% elif item.margin >= 15 %}bg-warning{% else %}bg-danger{% endif %}">
                                     {{ item.margin|floatformat:1 }}%
                                 </span>
-                            </td>
+                            </span></span></td>
                             <td class="text-center">
                                 {% if item.margin >= 30 %}
                                     <span class="badge bg-success">Excellent</span>
@@ -217,73 +235,102 @@
                                 {% else %}
                                     <span class="badge bg-danger">Poor</span>
                                 {% endif %}
-                            </td>
+                            </span></span></td>
                         </tr>
                         {% endfor %}
                     </tbody>
                     <tfoot class="table-light">
                         <tr>
-                            <td colspan="2" class="text-end fw-bold">Totals:</td>
-                            <td class="text-center fw-bold">{{ total_quantity }}</td>
-                            <td class="text-end fw-bold text-primary">${{ total_revenue|floatformat:2 }}</td>
-                            <td class="text-end fw-bold text-muted">${{ total_cost|floatformat:2 }}</td>
+                            <td colspan="3" class="text-end fw-bold">Totals:</span></td>
+                            <td class="text-center fw-bold">{{ total_quantity }}</span></span></td>
+                            <td class="text-center fw-bold">-</span></span></td>
+                            <td class="text-end fw-bold text-primary">UGX {{ total_revenue|floatformat:0 }}</span></span></td>
+                            <td class="text-end fw-bold text-muted">UGX {{ total_cost|floatformat:0 }}</span></span></td>
                             <td class="text-end fw-bold {% if total_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                ${{ total_profit|floatformat:2 }}
-                            </td>
+                                UGX {{ total_profit|floatformat:0 }}
+                            </span></span></td>
                             <td class="text-center fw-bold">
                                 <span class="badge bg-info">{{ total_margin|floatformat:1 }}%</span>
-                            </td>
-                            <td></td>
+                            </span></span></td>
+                            <td></span></td>
                         </tr>
                     </tfoot>
                 </table>
             </div>
 
-            <!-- Performance Summary -->
+            <!-- Unit Summary Section -->
             <div class="row mt-4">
                 <div class="col-md-6">
                     <div class="card">
                         <div class="card-header">
-                            <h6 class="card-title mb-0">Top Performing Products</h6>
+                            <h6 class="card-title mb-0">Sales by Unit Type</h6>
                         </div>
                         <div class="card-body">
-                            {% for item in product_sales|slice:":5" %}
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span>{{ item.product.name }}</span>
-                                <span class="badge bg-success">${{ item.profit|floatformat:2 }}</span>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Unit Type</th>
+                                            <th>Quantity Sold</th>
+                                            <th>Revenue (UGX)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for key, data in unit_summary.items %}
+                                        <tr>
+                                            <td>
+                                                <span class="badge bg-info">{{ data.unit_name|title }}</span>
+                                            </td>
+                                            <td>{{ data.quantity_sold|floatformat:2 }}</td>
+                                            <td>UGX {{ data.revenue|floatformat:0 }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
                             </div>
-                            {% endfor %}
                         </div>
                     </div>
                 </div>
                 <div class="col-md-6">
                     <div class="card">
                         <div class="card-header">
-                            <h6 class="card-title mb-0">Margin Analysis</h6>
+                            <h6 class="card-title mb-0">Performance Summary</h6>
                         </div>
                         <div class="card-body">
                             <div class="mb-2">
                                 <small>High Margin (≥30%):</small>
                                 <span class="badge bg-success float-end">
-                                    {{ product_sales|length|default:0 }} products
+                                    {% with high_margin=0 %}
+                                        {% for item in product_sales %}{% if item.margin >= 30 %}{% with high_margin=high_margin|add:1 %}{% endwith %}{% endif %}{% endfor %}
+                                        {{ high_margin }}
+                                    {% endwith %}
                                 </span>
                             </div>
                             <div class="mb-2">
                                 <small>Good Margin (20-29%):</small>
                                 <span class="badge bg-info float-end">
-                                    {{ product_sales|length|default:0 }} products
+                                    {% with good_margin=0 %}
+                                        {% for item in product_sales %}{% if item.margin >= 20 and item.margin < 30 %}{% with good_margin=good_margin|add:1 %}{% endwith %}{% endif %}{% endfor %}
+                                        {{ good_margin }}
+                                    {% endwith %}
                                 </span>
                             </div>
                             <div class="mb-2">
                                 <small>Average Margin (10-19%):</small>
                                 <span class="badge bg-warning float-end">
-                                    {{ product_sales|length|default:0 }} products
+                                    {% with avg_margin=0 %}
+                                        {% for item in product_sales %}{% if item.margin >= 10 and item.margin < 20 %}{% with avg_margin=avg_margin|add:1 %}{% endwith %}{% endif %}{% endfor %}
+                                        {{ avg_margin }}
+                                    {% endwith %}
                                 </span>
                             </div>
                             <div>
                                 <small>Low Margin (<10%):</small>
                                 <span class="badge bg-danger float-end">
-                                    {{ product_sales|length|default:0 }} products
+                                    {% with low_margin=0 %}
+                                        {% for item in product_sales %}{% if item.margin < 10 %}{% with low_margin=low_margin|add:1 %}{% endwith %}{% endif %}{% endfor %}
+                                        {{ low_margin }}
+                                    {% endwith %}
                                 </span>
                             </div>
                         </div>
@@ -313,7 +360,6 @@
     </div>
 </div>
 
-<!-- JavaScript for Export and Enhanced Features -->
 <script>
 function exportToExcel() {
     const table = document.getElementById('salesReportTable');
@@ -331,18 +377,13 @@ function exportToExcel() {
         csv.push(row.join(','));
     }
 
-    // Download CSV file
     const csvFile = new Blob([csv.join('\n')], {type: 'text/csv'});
     const downloadLink = document.createElement('a');
     downloadLink.download = 'sales-report-' + new Date().toISOString().split('T')[0] + '.csv';
     downloadLink.href = window.URL.createObjectURL(csvFile);
-    downloadLink.style.display = 'none';
-    document.body.appendChild(downloadLink);
     downloadLink.click();
-    document.body.removeChild(downloadLink);
 }
 
-// Auto-submit form when filters change
 document.addEventListener('DOMContentLoaded', function() {
     const filters = document.querySelectorAll('#reportForm select');
     filters.forEach(filter => {
@@ -352,7 +393,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-// Add print styles
 const style = document.createElement('style');
 style.textContent = `
     @media print {

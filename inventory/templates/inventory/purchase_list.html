@@ -4,7 +4,7 @@
 {% block content %}
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="text-primary">Purchase History</h2>
+        <h2 class="text-white">Purchase History</h2>
         <div>
             <a href="{% url 'inventory:purchase_add' %}" class="btn btn-primary">
                 <i class="fas fa-plus"></i> Add New Purchase
@@ -34,7 +34,7 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between">
                         <div>
-                            <h4 class="mb-0">CDF {{ total_spent|floatformat:0 }}</h4>
+                            <h4 class="mb-0">UGX {{ total_spent|floatformat:0 }}</h4>
                             <p class="mb-0">Total Spent</p>
                         </div>
                         <div class="align-self-center">
@@ -163,19 +163,19 @@
     {% endif %}
 
     <div class="card">
-        <div class="card-header bg-light d-flex justify-content-between align-items-center">
-            <h5 class="card-title mb-0">Purchase Records</h5>
+        <div class="card-header bg-dark d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0 text-white">Purchase Records</h5>
             <div>
                 <span class="badge bg-secondary me-2">{{ purchases|length }} records</span>
-                <button class="btn btn-sm btn-outline-primary" id="exportBtn">
+                <button class="btn btn-sm btn-outline-light" id="exportBtn">
                     <i class="fas fa-download"></i> Export
                 </button>
             </div>
         </div>
-        <div class="card-body">
+        <div class="card-body p-0">
             {% if purchases %}
             <div class="table-responsive">
-                <table class="table table-striped table-hover" id="purchasesTable">
+                <table class="table table-striped table-hover mb-0" id="purchasesTable">
                     <thead class="table-dark">
                         <tr>
                             <th>Reference</th>
@@ -220,11 +220,10 @@
                                 <small class="text-muted">units</small>
                             </td>
                             <td class="text-end">
-                                <strong class="text-success">CDF {{ purchase.total_amount|floatformat:0 }}</strong>
+                                <strong class="text-success">UGX {{ purchase.total_amount|floatformat:0 }}</strong>
                             </td>
                             <td class="text-center">
                                 <div class="btn-group btn-group-sm">
-                                    <!-- VIEW BUTTON -->
                                     <button type="button" class="btn btn-info view-details-btn" 
                                             title="View Details"
                                             data-bs-toggle="tooltip"
@@ -232,7 +231,6 @@
                                         <i class="fas fa-eye"></i>
                                     </button>
                                     
-                                    <!-- EDIT BUTTON -->
                                     <a href="{% url 'inventory:purchase_edit' purchase.id %}" 
                                        class="btn btn-warning" 
                                        title="Edit Purchase"
@@ -240,7 +238,6 @@
                                         <i class="fas fa-edit"></i>
                                     </a>
                                     
-                                    <!-- DELETE BUTTON -->
                                     <button type="button" class="btn btn-danger delete-purchase-btn"
                                             title="Delete Purchase"
                                             data-bs-toggle="tooltip"
@@ -264,7 +261,9 @@
                                             <thead class="table-light">
                                                 <tr>
                                                     <th>Product</th>
+                                                    <th>Unit</th>
                                                     <th class="text-center">Quantity</th>
+                                                    <th class="text-center">Base Quantity</th>
                                                     <th class="text-end">Unit Price</th>
                                                     <th class="text-end">Total Cost</th>
                                                 </tr>
@@ -277,23 +276,48 @@
                                                         <br>
                                                         <small class="text-muted">{{ item.product.sku }}</small>
                                                     </td>
+                                                    <td>
+                                                        {% if item.unit_name %}
+                                                            <span class="badge bg-info">
+                                                                {{ item.unit_name|title }}
+                                                            </span>
+                                                            <br>
+                                                            <small class="text-muted">{{ item.product.base_unit }} base</small>
+                                                        {% else %}
+                                                            <span class="badge bg-secondary">
+                                                                {{ item.product.base_unit|default:"piece" }}
+                                                            </span>
+                                                        {% endif %}
+                                                    </td>
                                                     <td class="text-center">
-                                                        {{ item.quantity }}
+                                                        <span class="badge bg-primary">
+                                                            {{ item.quantity|floatformat:0 }}
+                                                            {% if item.unit_name %}
+                                                                {{ item.unit_name }}
+                                                            {% else %}
+                                                                {{ item.product.base_unit }}s
+                                                            {% endif %}
+                                                        </span>
+                                                    </td>
+                                                    <td class="text-center">
+                                                        <span class="badge bg-secondary">
+                                                            {{ item.base_quantity|default:item.quantity|floatformat:0 }} {{ item.product.base_unit }}s
+                                                        </span>
                                                     </td>
                                                     <td class="text-end">
-                                                        CDF {{ item.unit_price|floatformat:0 }}
+                                                        UGX {{ item.unit_price|floatformat:0 }}
                                                     </td>
                                                     <td class="text-end fw-bold">
-                                                        CDF {{ item.get_total_cost|floatformat:0 }}
+                                                        UGX {{ item.get_total_cost|floatformat:0 }}
                                                     </td>
                                                 </tr>
                                                 {% endfor %}
                                             </tbody>
                                             <tfoot class="table-light">
                                                 <tr>
-                                                    <td colspan="3" class="text-end fw-bold">Grand Total:</td>
+                                                    <td colspan="5" class="text-end fw-bold">Grand Total:</td>
                                                     <td class="text-end fw-bold text-success">
-                                                        CDF {{ purchase.total_amount|floatformat:0 }}
+                                                        UGX {{ purchase.total_amount|floatformat:0 }}
                                                     </td>
                                                 </tr>
                                             </tfoot>
@@ -320,8 +344,8 @@
                     <tfoot class="table-light">
                         <tr>
                             <td colspan="6" class="text-end fw-bold">Grand Total:</td>
-                            <td class="text-end fw-bold text-success">CDF {{ total_spent|floatformat:0 }}</td>
-                            <td></td>
+                            <td class="text-end fw-bold text-success">UGX {{ total_spent|floatformat:0 }}</span></td>
+                            <td></span></td>
                         </tr>
                     </tfoot>
                     {% endif %}
@@ -329,8 +353,8 @@
             </div>
 
             <!-- Quick Actions -->
-            <div class="mt-4 p-3 bg-light rounded">
-                <h6 class="mb-3">Quick Actions</h6>
+            <div class="mt-4 p-3 bg-dark rounded">
+                <h6 class="text-white mb-3">Quick Actions</h6>
                 <div class="btn-group">
                     <a href="{% url 'inventory:purchase_add' %}" class="btn btn-success btn-sm">
                         <i class="fas fa-plus"></i> Add New Purchase
@@ -371,7 +395,7 @@
 
 <!-- Delete Confirmation Modal -->
 <div class="modal fade" id="deletePurchaseModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title">
@@ -389,7 +413,7 @@
                     <div class="card-body">
                         <h6>Purchase Details:</h6>
                         <p><strong>Supplier:</strong> <span id="deletePurchaseSupplier"></span></p>
-                        <p><strong>Total Amount:</strong> CDF <span id="deletePurchaseAmount"></span></p>
+                        <p><strong>Total Amount:</strong> UGX <span id="deletePurchaseAmount"></span></p>
                         <p><strong>Items:</strong> <span id="deletePurchaseItems"></span> items</p>
                     </div>
                 </div>
@@ -413,12 +437,11 @@
     </div>
 </div>
 
-<!-- JavaScript for enhanced functionality -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize tooltips
     const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    const tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
 
@@ -430,14 +453,11 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (detailsRow) {
                 const isVisible = detailsRow.style.display !== 'none';
-                // Hide all other details first
                 document.querySelectorAll('.purchase-details').forEach(row => {
                     row.style.display = 'none';
                 });
-                // Toggle current row
                 detailsRow.style.display = isVisible ? 'none' : 'table-row';
                 
-                // Update button icon
                 const icon = this.querySelector('i');
                 if (icon) {
                     icon.className = isVisible ? 'fas fa-eye' : 'fas fa-eye-slash';
@@ -455,73 +475,41 @@ document.addEventListener('DOMContentLoaded', function() {
             const purchaseAmount = this.dataset.purchaseAmount;
             const purchaseItems = this.closest('tr').querySelector('.fw-bold').textContent.trim();
             
-            // Update modal content
             document.getElementById('deletePurchaseRef').textContent = purchaseRef;
             document.getElementById('deletePurchaseSupplier').textContent = purchaseSupplier;
             document.getElementById('deletePurchaseAmount').textContent = purchaseAmount;
             document.getElementById('deletePurchaseItems').textContent = purchaseItems;
             
-            // Update form action
             const deleteForm = document.getElementById('deletePurchaseForm');
-            deleteForm.action = `{% url 'inventory:purchase_delete' 0 %}`.replace('0', purchaseId);
+            deleteForm.action = `/inventory/purchases/${purchaseId}/delete/`;
             
-            // Show modal
             const deleteModal = new bootstrap.Modal(document.getElementById('deletePurchaseModal'));
             deleteModal.show();
         });
     });
 
-    // Auto-submit form when date filters change
-    const dateFrom = document.querySelector('input[name="date_from"]');
-    const dateTo = document.querySelector('input[name="date_to"]');
-    
-    if (dateFrom) dateFrom.addEventListener('change', function() { this.form.submit(); });
-    if (dateTo) dateTo.addEventListener('change', function() { this.form.submit(); });
-
     // Export functionality
     document.getElementById('exportBtn').addEventListener('click', function() {
-        // Simple CSV export
         const table = document.getElementById('purchasesTable');
         let csv = [];
         const rows = table.querySelectorAll('tr');
         
         for (let i = 0; i < rows.length; i++) {
             let row = [], cols = rows[i].querySelectorAll('td, th');
-            
             for (let j = 0; j < cols.length; j++) {
-                // Skip action columns and hidden detail rows
                 if (!cols[j].querySelector('.btn-group') && !cols[j].closest('.purchase-details')) {
                     let text = cols[j].innerText.replace(/,/g, '');
                     row.push(text);
                 }
             }
-            
-            if (row.length > 0) {
-                csv.push(row.join(','));
-            }
+            if (row.length > 0) csv.push(row.join(','));
         }
 
-        // Download CSV file
         const csvFile = new Blob([csv.join('\n')], {type: 'text/csv'});
         const downloadLink = document.createElement('a');
         downloadLink.download = 'purchases-export-' + new Date().toISOString().split('T')[0] + '.csv';
         downloadLink.href = window.URL.createObjectURL(csvFile);
-        downloadLink.style.display = 'none';
-        document.body.appendChild(downloadLink);
         downloadLink.click();
-        document.body.removeChild(downloadLink);
-    });
-
-    // Add row hover effects
-    const tableRows = document.querySelectorAll('#purchasesTable tbody tr:not(.purchase-details)');
-    tableRows.forEach(row => {
-        row.addEventListener('mouseenter', function() {
-            this.style.backgroundColor = '#f8f9fa';
-        });
-        
-        row.addEventListener('mouseleave', function() {
-            this.style.backgroundColor = '';
-        });
     });
 });
 
@@ -577,5 +565,7 @@ function printPurchaseTable() {
 .purchase-details {
     background-color: #f8f9fa;
 }
+.text-white { color: white !important; }
+.bg-dark { background-color: #1e293b !important; }
 </style>
 {% endblock %}

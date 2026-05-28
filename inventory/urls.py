@@ -143,5 +143,16 @@ path('reports/export-transfer/<str:report_type>/', views.export_transfer_report,
 #  Product Movement Reports
 path('products/<int:product_id>/movement-report/', views.product_movement_report, name='product_movement_report'),
 path('products/<int:product_id>/movement-export/', views.product_movement_export, name='product_movement_export'),
+
+    # Search and API
+    path('search_product/', views.search_product, name='search_product'),
+    path('api/products/', views.product_search_api, name='product_search_api'),
+    
+    # ADD THESE TWO LINES - FIX FOR SALE FORM
+    path('api/stock/<int:product_id>/<int:location_id>/', views.api_product_stock, name='api_product_stock'),
+    path('api/product-units/<int:product_id>/', views.api_product_units, name='api_product_units'),
+    
+    # ... rest of your URLs ...
+
 ] 
 

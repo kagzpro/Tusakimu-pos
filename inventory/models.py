@@ -1,11 +1,13 @@
-from django.db import models
+﻿from django.db import models
 from django.db.models import Sum
 from django.contrib.auth.models import User
 from core.models import Location
 from transactions.models import Customer
 from django.utils import timezone
+from decimal import Decimal
 
-# Define choices at the top of the file - REMOVE DUPLICATES
+# ==================== CHOICES ====================
+
 class DocumentType(models.TextChoices):
     INVOICE = 'invoice', 'Invoice'
     QUOTATION = 'quotation', 'Quotation'
@@ -19,12 +21,14 @@ class Currency(models.TextChoices):
     GBP = 'GBP', 'British Pound'
     KES = 'KES', 'Kenyan Shilling'
     TZS = 'TZS', 'Tanzanian Shilling'
-    UGX = 'CDF', 'Ugandan Shilling'
+    UGX = 'UGX', 'Ugandan Shilling'
     ZAR = 'ZAR', 'South African Rand'
     XAF = 'XAF', 'Central African CFA Franc'
     XOF = 'XOF', 'West African CFA Franc'
     GHS = 'GHS', 'Ghanaian Cedi'
     NGN = 'NGN', 'Nigerian Naira'
+
+# ==================== BASIC MODELS ====================
 
 class Category(models.Model):
     name = models.CharField(max_length=100)
@@ -43,14 +47,23 @@ class Supplier(models.Model):
     def __str__(self):
         return self.name
 
+# ==================== PRODUCT WITH UNITS OF MEASURE ====================
+
 class Product(models.Model):
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True)
     name = models.CharField(max_length=200)
     sku = models.CharField(max_length=100, unique=True)
+    base_unit = models.CharField(
+        max_length=50, 
+        default='piece',
+        help_text="Smallest unit of measure (e.g., piece, gram, ml, meter)"
+    )
     cost_price = models.DecimalField(max_digits=10, decimal_places=2)
     selling_price = models.DecimalField(max_digits=10, decimal_places=2)
     reorder_level = models.IntegerField(default=10)
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.name
@@ -58,6 +71,80 @@ class Product(models.Model):
     @property
     def total_stock(self):
         return sum(stock.quantity for stock in self.stocks.all())
+    
+    @property
+    def has_multiple_units(self):
+        return self.units.count() > 1
+    
+    @property
+    def default_unit(self):
+        return self.units.filter(is_default=True).first() or self.units.first()
+    
+    def get_stock_in_unit(self, unit):
+        if unit and unit.quantity_in_base > 0:
+            return self.total_stock / unit.quantity_in_base
+        return self.total_stock
+    
+    def convert_to_base_unit(self, quantity, unit):
+        if unit and unit.quantity_in_base:
+            return quantity * unit.quantity_in_base
+        return quantity
+    
+    def convert_from_base_unit(self, quantity, unit):
+        if unit and unit.quantity_in_base:
+            return quantity / unit.quantity_in_base
+        return quantity
+    
+    def get_price_for_unit(self, unit):
+        if unit:
+            return unit.selling_price
+        return self.selling_price
+
+class ProductUnit(models.Model):
+    product = models.ForeignKey(
+        Product, 
+        related_name='units', 
+        on_delete=models.CASCADE
+    )
+    unit_name = models.CharField(
+        max_length=50,
+        help_text="Name of the unit (e.g., piece, packet, carton, box, dozen)"
+    )
+    quantity_in_base = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=1,
+        help_text="How many base units in this unit (e.g., 1 carton = 50 pieces)"
+    )
+    selling_price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2,
+        help_text="Selling price for this unit"
+    )
+    is_default = models.BooleanField(
+        default=False,
+        help_text="Default unit for selling (usually the smallest unit)"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this unit is available for sale"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['product', 'unit_name']
+        ordering = ['quantity_in_base']
+        verbose_name = "Product Unit"
+        verbose_name_plural = "Product Units"
+
+    def __str__(self):
+        return f"{self.product.name} - 1 {self.unit_name} = {self.quantity_in_base} {self.product.base_unit}s"
+
+    def get_price_per_base_unit(self):
+        if self.quantity_in_base > 0:
+            return self.selling_price / self.quantity_in_base
+        return self.selling_price
 
 class ProductStock(models.Model):
     product = models.ForeignKey(Product, related_name='stocks', on_delete=models.CASCADE)
@@ -70,8 +157,9 @@ class ProductStock(models.Model):
     def __str__(self):
         return f"{self.product.name} @ {self.location.name}"
 
+# ==================== PURCHASE ====================
+
 class Purchase(models.Model):
-    """Main purchase that can contain multiple products"""
     reference = models.CharField(max_length=20, unique=True, blank=True)
     supplier_name = models.CharField(max_length=200)
     location = models.ForeignKey(Location, on_delete=models.SET_NULL, null=True)
@@ -95,33 +183,49 @@ class Purchase(models.Model):
         return self.items.count()
 
 class PurchaseItem(models.Model):
-    """Individual items within a purchase"""
     purchase = models.ForeignKey(Purchase, related_name='items', on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # Changed to Decimal
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    # Unit of measure fields for purchase
+    unit_id = models.IntegerField(null=True, blank=True, help_text="ID of the unit used for this purchase")
+    unit_name = models.CharField(max_length=50, blank=True, help_text="Name of unit (carton, packet, piece)")
+    base_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Quantity in base units")
     
     def get_total_cost(self):
         return self.quantity * self.unit_price
     
     def save(self, *args, **kwargs):
+        # Calculate base quantity if not set
+        if self.base_quantity <= 0 and self.unit_id:
+            try:
+                unit = ProductUnit.objects.get(id=self.unit_id, product=self.product)
+                self.base_quantity = float(self.quantity) * float(unit.quantity_in_base)
+            except ProductUnit.DoesNotExist:
+                self.base_quantity = float(self.quantity)
+        elif self.base_quantity <= 0:
+            self.base_quantity = float(self.quantity)
+        
         super().save(*args, **kwargs)
-        # Update stock when purchase item is saved
+        
+        # Update stock when purchase item is saved - use base_quantity
         if self.purchase.location:
             stock, created = ProductStock.objects.get_or_create(
                 product=self.product,
                 location=self.purchase.location,
                 defaults={'quantity': 0}
             )
-            stock.quantity += self.quantity
+            stock.quantity += self.base_quantity
             stock.save()
     
     def __str__(self):
-        return f"{self.product.name} - {self.quantity} units"
+        unit_display = f" ({self.unit_name})" if self.unit_name else ""
+        return f"{self.product.name} - {self.quantity}{unit_display} units"
+
+# ==================== STOCK TRANSFERS ====================
 
 class TransferBatch(models.Model):
-    """Represents a group of stock transfers (like one transfer receipt)."""
-    
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('confirmed', 'Confirmed'),
@@ -141,11 +245,7 @@ class TransferBatch(models.Model):
         on_delete=models.SET_NULL, 
         null=True
     )
-    status = models.CharField(
-        max_length=20, 
-        choices=STATUS_CHOICES, 
-        default='pending'
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     confirmed_by = models.ForeignKey(
@@ -160,18 +260,15 @@ class TransferBatch(models.Model):
     transfer_date = models.DateTimeField(default=timezone.now)
 
     def get_total_quantity(self):
-        """Get total quantity of all items in this batch"""
         return self.items.aggregate(total=Sum('quantity'))['total'] or 0
     
     def get_items_count(self):
-        """Get number of items in this batch"""
         return self.items.count()
 
     def __str__(self):
         return f"Batch {self.reference} - {self.status}"
 
     def confirm(self, user):
-        """Confirm all transfers in this batch"""
         if self.status != 'pending':
             raise ValueError("Only pending batches can be confirmed.")
         
@@ -184,7 +281,6 @@ class TransferBatch(models.Model):
         self.save()
 
     def cancel(self):
-        """Cancel the entire batch"""
         if self.status != 'pending':
             raise ValueError("Only pending batches can be cancelled.")
         
@@ -192,7 +288,6 @@ class TransferBatch(models.Model):
         self.save()
 
 class StockTransfer(models.Model):
-    """Each individual product transfer, linked to a batch."""
     PENDING = 'pending'
     CONFIRMED = 'confirmed'
     CANCELLED = 'cancelled'
@@ -208,19 +303,24 @@ class StockTransfer(models.Model):
         related_name='items'
     )
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=PENDING)
     transfer_date = models.DateTimeField(default=timezone.now)
     transferred_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    # Unit of measure fields for transfer
+    unit_id = models.IntegerField(null=True, blank=True, help_text="ID of the unit used for this transfer")
+    unit_name = models.CharField(max_length=50, blank=True, help_text="Name of unit (carton, packet, piece)")
+    base_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Quantity in base units")
 
     class Meta:
         ordering = ['-transfer_date']
 
     def __str__(self):
-        return f"{self.product.name} ({self.quantity}) - {self.status}"
+        unit_display = f" ({self.unit_name})" if self.unit_name else ""
+        return f"{self.product.name} - {self.quantity}{unit_display} - {self.status}"
 
     def confirm_transfer(self, confirmed_by_user):
-        """Confirm the transfer and update stock"""
         if self.status != self.PENDING:
             raise ValueError("Only pending transfers can be confirmed")
         
@@ -230,16 +330,17 @@ class StockTransfer(models.Model):
         from_location = self.batch.from_location
         to_location = self.batch.to_location
 
-        # Check stock at source
+        # Use base_quantity for stock calculation
+        quantity_to_transfer = self.base_quantity if self.base_quantity > 0 else self.quantity
+
         try:
             from_stock = ProductStock.objects.get(product=self.product, location=from_location)
-            if from_stock.quantity < self.quantity:
-                raise ValueError(f"Not enough stock at {from_location.name}. Available: {from_stock.quantity}, Requested: {self.quantity}")
+            if from_stock.quantity < quantity_to_transfer:
+                raise ValueError(f"Not enough stock at {from_location.name}. Available: {from_stock.quantity}, Requested: {quantity_to_transfer}")
         except ProductStock.DoesNotExist:
             raise ValueError(f"No stock found for {self.product.name} at {from_location.name}")
 
-        # Deduct from source and add to destination
-        from_stock.quantity -= self.quantity
+        from_stock.quantity -= quantity_to_transfer
         from_stock.save()
 
         to_stock, _ = ProductStock.objects.get_or_create(
@@ -247,23 +348,22 @@ class StockTransfer(models.Model):
             location=to_location,
             defaults={'quantity': 0}
         )
-        to_stock.quantity += self.quantity
+        to_stock.quantity += quantity_to_transfer
         to_stock.save()
 
-        # Mark as confirmed
         self.status = self.CONFIRMED
         self.save()
 
     def cancel_transfer(self):
-        """Cancel this individual transfer"""
         if self.status != self.PENDING:
             raise ValueError("Only pending transfers can be cancelled")
         
         self.status = self.CANCELLED
         self.save()
 
+# ==================== RETAIL ====================
+
 class RetailStock(models.Model):
-    """Tracks retail stock separate from main inventory."""
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     location = models.ForeignKey(Location, on_delete=models.CASCADE)
     quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -275,7 +375,6 @@ class RetailStock(models.Model):
         return f"{self.product.name} @ {self.location.name} (Retail)"
 
 class RetailSale(models.Model):
-    """A retail sale where the customer pays any amount and receives corresponding quantity."""
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     location = models.ForeignKey(Location, on_delete=models.CASCADE)
     amount_given = models.DecimalField(max_digits=12, decimal_places=2)
@@ -283,15 +382,26 @@ class RetailSale(models.Model):
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     sale_date = models.DateTimeField(auto_now_add=True)
     sold_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    
+    # Unit of measure fields for retail sale
+    unit_id = models.IntegerField(null=True, blank=True, help_text="ID of the unit used for this retail sale")
+    unit_name = models.CharField(max_length=50, blank=True, help_text="Name of unit sold")
+    base_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Quantity in base units")
 
     def save(self, *args, **kwargs):
-        # Calculate quantity based on amount given
-        self.quantity_given = self.amount_given / self.unit_price
-
-        # Convert to integer for ProductStock (since it uses PositiveIntegerField)
-        quantity_int = int(self.quantity_given)
+        # Calculate base quantity if not set
+        if self.base_quantity <= 0 and self.unit_id:
+            try:
+                unit = ProductUnit.objects.get(id=self.unit_id, product=self.product)
+                self.base_quantity = float(self.quantity_given) * float(unit.quantity_in_base)
+            except ProductUnit.DoesNotExist:
+                self.base_quantity = float(self.quantity_given)
+        elif self.base_quantity <= 0:
+            self.base_quantity = float(self.quantity_given)
         
-        # Deduct from main ProductStock
+        # Deduct from main ProductStock using base_quantity
+        quantity_int = int(self.base_quantity)
+        
         main_stock = ProductStock.objects.get(product=self.product, location=self.location)
         if main_stock.quantity < quantity_int:
             raise ValueError(f"Not enough stock in main inventory. Available: {main_stock.quantity}")
@@ -299,12 +409,13 @@ class RetailSale(models.Model):
         main_stock.quantity -= quantity_int
         main_stock.save()
 
-        # Add to RetailStock (this uses DecimalField so no conversion needed)
         retail_stock, _ = RetailStock.objects.get_or_create(product=self.product, location=self.location)
         retail_stock.quantity += self.quantity_given
         retail_stock.save()
 
         super().save(*args, **kwargs)
+
+# ==================== SALE ====================
 
 class Sale(models.Model):
     DOCUMENT_STATUS = [
@@ -321,7 +432,6 @@ class Sale(models.Model):
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     
-    # Document fields
     document_type = models.CharField(
         max_length=20, 
         choices=DocumentType.choices, 
@@ -342,7 +452,6 @@ class Sale(models.Model):
     notes = models.TextField(blank=True)
     terms = models.TextField(blank=True)
     
-    # Track creation and updates
     created_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, related_name='sales_created')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -351,7 +460,6 @@ class Sale(models.Model):
         ordering = ['-date']
 
     def save(self, *args, **kwargs):
-        # Generate document number if not set
         if not self.document_number:
             prefix = self.document_type.upper()[:3]
             last_doc = Sale.objects.filter(document_type=self.document_type).order_by('-id').first()
@@ -362,7 +470,7 @@ class Sale(models.Model):
 
     def __str__(self):
         customer_name = self.customer.name if self.customer else 'Walk-in'
-        return f"{self.document_number} - {customer_name} - ${self.total_amount}"
+        return f"{self.document_number} - {customer_name} - UGX {self.total_amount}"
 
     @property
     def balance_due(self):
@@ -376,22 +484,17 @@ class Sale(models.Model):
 
     @property
     def payment_status(self):
-        """Calculate payment status based on paid amount"""
         if self.paid_amount >= self.total_amount:
             return 'fully_paid'
         elif self.paid_amount > 0:
             return 'partially_paid'
-        else:
-            return 'not_paid'
+        return 'not_paid'
     
     @property 
     def is_fully_paid(self):
-        """Check if sale is fully paid"""
         return self.balance_due <= 0
 
-
     def update_payment_status(self):
-        """Update document status based on payment"""
         if self.paid_amount >= self.total_amount:
             self.document_status = 'paid'
         elif self.paid_amount > 0 and self.document_status == 'draft':
@@ -401,7 +504,10 @@ class Sale(models.Model):
 class SaleItem(models.Model):
     sale = models.ForeignKey(Sale, related_name='items', on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=2)
+    unit_id = models.IntegerField(null=True, blank=True, help_text="ID of the unit used for this sale")
+    unit_name = models.CharField(max_length=50, blank=True, help_text="Name of unit (carton, packet, piece)")
+    base_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Quantity in base units")
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
 
@@ -409,17 +515,31 @@ class SaleItem(models.Model):
         ordering = ['id']
 
     def save(self, *args, **kwargs):
-        # Calculate total price
-        self.total_price = self.quantity * self.unit_price
+        if self.unit_id and self.product:
+            try:
+                unit = ProductUnit.objects.get(id=self.unit_id)
+                self.base_quantity = float(self.quantity) * float(unit.quantity_in_base)
+                if not self.unit_name:
+                    self.unit_name = unit.unit_name
+            except ProductUnit.DoesNotExist:
+                self.base_quantity = float(self.quantity)
+                self.unit_name = self.product.base_unit if self.product else 'piece'
+        else:
+            self.base_quantity = float(self.quantity)
+            self.unit_name = self.product.base_unit if self.product else 'piece'
+        
+        self.total_price = float(self.quantity) * float(self.unit_price)
         super().save(*args, **kwargs)
         
-        # Update sale total (but don't handle stock here anymore)
         if self.sale.pk:
-            self.sale.total_amount = sum(item.total_price for item in self.sale.items.all())
+            self.sale.total_amount = sum(float(item.total_price) for item in self.sale.items.all())
             self.sale.save()
 
     def __str__(self):
-        return f"{self.product.name} - {self.quantity} x ${self.unit_price}"
+        unit_display = f" ({self.unit_name})" if self.unit_name else ""
+        return f"{self.product.name} - {self.quantity}{unit_display} x UGX {self.unit_price}"
+
+# ==================== PAYMENT ====================
 
 class Payment(models.Model):
     PAYMENT_METHODS = [
@@ -441,14 +561,12 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Payment of {self.amount} for {self.sale.document_number}"
+        return f"Payment of UGX {self.amount} for {self.sale.document_number}"
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        # Update sale's paid amount
         self.sale.paid_amount = sum(payment.amount for payment in self.sale.payments.all())
         
-        # Update sale status based on payment
         if self.sale.paid_amount >= self.sale.total_amount:
             self.sale.document_status = 'paid'
         elif self.sale.paid_amount > 0:
@@ -458,8 +576,9 @@ class Payment(models.Model):
         
         self.sale.save()
 
+# ==================== PURCHASE ORDER ====================
+
 class PurchaseOrder(models.Model):
-    """Main purchase order that can contain multiple products"""
     STATUS_CHOICES = [
         ('draft', 'Draft'),
         ('ordered', 'Ordered'),
@@ -494,7 +613,6 @@ class PurchaseOrder(models.Model):
         return self.items.count()
 
     def mark_received(self):
-        """Mark purchase order as received and update stock"""
         if self.status != 'ordered':
             raise ValueError("Only ordered purchases can be marked as received")
         
@@ -505,27 +623,44 @@ class PurchaseOrder(models.Model):
                     location=self.location,
                     defaults={'quantity': 0}
                 )
-                stock.quantity += item.quantity
+                stock.quantity += item.base_quantity if item.base_quantity > 0 else item.quantity
                 stock.save()
         
         self.status = 'received'
         self.save()
 
 class PurchaseOrderItem(models.Model):
-    """Individual items within a purchase order"""
     purchase_order = models.ForeignKey(PurchaseOrder, related_name='items', on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    # Unit of measure fields
+    unit_id = models.IntegerField(null=True, blank=True, help_text="ID of the unit used for this purchase order")
+    unit_name = models.CharField(max_length=50, blank=True, help_text="Name of unit (carton, packet, piece)")
+    base_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Quantity in base units")
     
     def get_total_cost(self):
         return self.quantity * self.unit_price
     
+    def save(self, *args, **kwargs):
+        if self.base_quantity <= 0 and self.unit_id:
+            try:
+                unit = ProductUnit.objects.get(id=self.unit_id, product=self.product)
+                self.base_quantity = float(self.quantity) * float(unit.quantity_in_base)
+            except ProductUnit.DoesNotExist:
+                self.base_quantity = float(self.quantity)
+        elif self.base_quantity <= 0:
+            self.base_quantity = float(self.quantity)
+        super().save(*args, **kwargs)
+    
     def __str__(self):
-        return f"{self.product.name} - {self.quantity} units @ ${self.unit_price}"
+        unit_display = f" ({self.unit_name})" if self.unit_name else ""
+        return f"{self.product.name} - {self.quantity}{unit_display} @ UGX {self.unit_price}"
+
+# ==================== SALE ORDER ====================
 
 class SaleOrder(models.Model):
-    """Main sale order that can contain multiple products"""
     STATUS_CHOICES = [
         ('draft', 'Draft'),
         ('confirmed', 'Confirmed'),
@@ -560,11 +695,9 @@ class SaleOrder(models.Model):
         return self.items.count()
 
     def confirm_order(self):
-        """Confirm sale order and update stock"""
         if self.status != 'draft':
             raise ValueError("Only draft sales can be confirmed")
         
-        # Check stock availability first
         for item in self.items.all():
             if self.location:
                 try:
@@ -572,40 +705,58 @@ class SaleOrder(models.Model):
                         product=item.product,
                         location=self.location
                     )
-                    if stock.quantity < item.quantity:
-                        raise ValueError(f"Not enough stock for {item.product.name}. Available: {stock.quantity}, Requested: {item.quantity}")
+                    qty_to_deduct = item.base_quantity if item.base_quantity > 0 else item.quantity
+                    if stock.quantity < qty_to_deduct:
+                        raise ValueError(f"Not enough stock for {item.product.name}. Available: {stock.quantity}, Requested: {qty_to_deduct}")
                 except ProductStock.DoesNotExist:
                     raise ValueError(f"No stock found for {item.product.name} at {self.location.name}")
         
-        # Deduct stock
         for item in self.items.all():
             if self.location:
                 stock = ProductStock.objects.get(
                     product=item.product,
                     location=self.location
                 )
-                stock.quantity -= item.quantity
+                qty_to_deduct = item.base_quantity if item.base_quantity > 0 else item.quantity
+                stock.quantity -= qty_to_deduct
                 stock.save()
         
         self.status = 'confirmed'
         self.save()
 
 class SaleOrderItem(models.Model):
-    """Individual items within a sale order"""
     sale_order = models.ForeignKey(SaleOrder, related_name='items', on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    # Unit of measure fields
+    unit_id = models.IntegerField(null=True, blank=True, help_text="ID of the unit used for this sale order")
+    unit_name = models.CharField(max_length=50, blank=True, help_text="Name of unit (carton, packet, piece)")
+    base_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Quantity in base units")
     
     def get_total_price(self):
         return self.quantity * self.unit_price
     
+    def save(self, *args, **kwargs):
+        if self.base_quantity <= 0 and self.unit_id:
+            try:
+                unit = ProductUnit.objects.get(id=self.unit_id, product=self.product)
+                self.base_quantity = float(self.quantity) * float(unit.quantity_in_base)
+            except ProductUnit.DoesNotExist:
+                self.base_quantity = float(self.quantity)
+        elif self.base_quantity <= 0:
+            self.base_quantity = float(self.quantity)
+        super().save(*args, **kwargs)
+    
     def __str__(self):
-        return f"{self.product.name} - {self.quantity} x ${self.unit_price}"
+        unit_display = f" ({self.unit_name})" if self.unit_name else ""
+        return f"{self.product.name} - {self.quantity}{unit_display} x UGX {self.unit_price}"
 
+# ==================== COMPANY DETAILS ====================
 
 class CompanyDetails(models.Model):
-    name = models.CharField(max_length=200, default="Teba Inventory")
+    name = models.CharField(max_length=200, default="Tusakimu Enterprises")
     address = models.TextField(blank=True, null=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
     email = models.EmailField(blank=True, null=True)
@@ -616,12 +767,10 @@ class CompanyDetails(models.Model):
     bank_account = models.CharField(max_length=50, blank=True, null=True)
     bank_branch = models.CharField(max_length=100, blank=True, null=True)
     
-    # Document settings
     invoice_prefix = models.CharField(max_length=10, default="INV")
     quotation_prefix = models.CharField(max_length=10, default="QUO")
     receipt_prefix = models.CharField(max_length=10, default="REC")
     
-    # Footer text for documents
     invoice_footer = models.TextField(blank=True, null=True, help_text="Footer text for invoices")
     quotation_footer = models.TextField(blank=True, null=True, help_text="Footer text for quotations")
     
@@ -636,9 +785,7 @@ class CompanyDetails(models.Model):
         return self.name
 
     def save(self, *args, **kwargs):
-        # Ensure only one company details record exists
         if not self.pk and CompanyDetails.objects.exists():
-            # Update the existing record instead of creating new one
             existing = CompanyDetails.objects.first()
             existing.name = self.name
             existing.address = self.address
@@ -659,6 +806,7 @@ class CompanyDetails(models.Model):
             return
         super().save(*args, **kwargs)
 
+# ==================== STOCK TAKE ====================
 
 class StockTake(models.Model):
     STATUS_CHOICES = [
@@ -696,16 +844,13 @@ class StockTake(models.Model):
         return self.items.filter(quantity_counted__isnull=True).count()
 
     def complete_stocktake(self):
-        """Complete the stocktake and update actual stock quantities"""
         if self.status != 'completed':
             self.status = 'completed'
             self.completed_date = timezone.now()
             self.save()
 
-            # Update actual stock quantities
             for item in self.items.all():
                 if item.quantity_counted is not None:
-                    # Update the product stock
                     stock, created = ProductStock.objects.get_or_create(
                         product=item.product,
                         location=self.location,
@@ -715,13 +860,12 @@ class StockTake(models.Model):
                         stock.quantity = item.quantity_counted
                         stock.save()
 
-
 class StockTakeItem(models.Model):
     stock_take = models.ForeignKey(StockTake, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    quantity_on_hand = models.IntegerField(default=0)  # System quantity before stocktake
-    quantity_counted = models.IntegerField(null=True, blank=True)  # Physical count
-    variance = models.IntegerField(default=0)  # difference: counted - on_hand
+    quantity_on_hand = models.IntegerField(default=0)
+    quantity_counted = models.IntegerField(null=True, blank=True)
+    variance = models.IntegerField(default=0)
     notes = models.TextField(blank=True)
     counted_at = models.DateTimeField(null=True, blank=True)
     counted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
@@ -730,10 +874,9 @@ class StockTakeItem(models.Model):
         unique_together = ['stock_take', 'product']
 
     def save(self, *args, **kwargs):
-        # Calculate variance
         if self.quantity_counted is not None and self.quantity_on_hand is not None:
             self.variance = self.quantity_counted - self.quantity_on_hand
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.product.name} - {self.quantity_counted}"      
+        return f"{self.product.name} - Counted: {self.quantity_counted}"
