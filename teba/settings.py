@@ -53,7 +53,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize',
     'django.contrib.sites',
-    'whitenoise.runserver_nostatic',  # Add whitenoise for static files
+    'whitenoise.runserver_nostatic',
     'rest_framework',
     'rest_framework.authtoken',
     'allauth',
@@ -72,7 +72,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # Add whitenoise - IMPORTANT: after security, before others
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -124,9 +124,12 @@ if IS_RAILWAY:
         'default': dj_database_url.config(
             default=DATABASE_URL,
             conn_max_age=600,
-            conn_health_checks=True,
         )
     }
+    # Add SSL requirement for secure connection
+    if 'OPTIONS' not in DATABASES['default']:
+        DATABASES['default']['OPTIONS'] = {}
+    DATABASES['default']['OPTIONS']['sslmode'] = 'require'
 else:
     # Use SQLite for local development
     DATABASES = {
@@ -228,7 +231,7 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 # AXES - Disabled for Development
 # =======================
 
-AXES_ENABLED = not IS_RAILWAY  # Disable for local, enable for production
+AXES_ENABLED = not IS_RAILWAY
 AXES_FAILURE_LIMIT = 5
 AXES_RESET_ON_SUCCESS = True
 AXES_LOCKOUT_TEMPLATE = 'account/lockout.html'
@@ -259,12 +262,7 @@ LOGIN_URL = '/accounts/login/'
 # EMAIL CONFIGURATION
 # =======================
 
-if IS_RAILWAY:
-    # Use console email for Railway (you can later configure SMTP)
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-else:
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 EMAIL_HOST = 'localhost'
 EMAIL_PORT = 1025
 DEFAULT_FROM_EMAIL = 'noreply@tusakimu.com'
