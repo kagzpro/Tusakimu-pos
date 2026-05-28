@@ -1,1 +1,1 @@
-web: gunicorn teba.wsgi:application
+web: gunicorn teba.wsgi
