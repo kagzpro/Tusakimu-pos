@@ -1,6 +1,6 @@
 """
-Django settings for teba project - OPTIMIZED FOR LOCAL DEVELOPMENT
-(FRENCH REMOVED - ENGLISH ONLY)
+Django settings for teba project - OPTIMIZED FOR LOCAL DEVELOPMENT & RAILWAY
+(ENGLISH ONLY)
 """
 
 from pathlib import Path
@@ -17,20 +17,28 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# FORCE LOCAL DEVELOPMENT
-IS_PRODUCTION = False
-IS_RAILWAY = False
-DEBUG = True  # MUST BE TRUE FOR LOCAL
+# Detect if running on Railway
+IS_RAILWAY = os.environ.get('RAILWAY_ENVIRONMENT') == 'production' or 'DATABASE_URL' in os.environ
+IS_PRODUCTION = IS_RAILWAY
+DEBUG = not IS_PRODUCTION  # False on Railway, True locally
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key-only-for-local-development-change-in-production')
+# Secret Key - use environment variable in production
+SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-key-only-for-local-development-change-in-production')
 
-# Local development hosts
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-    'http://0.0.0.0:8000',
-]
+# Allowed hosts
+if IS_RAILWAY:
+    ALLOWED_HOSTS = ['*', '.railway.app', 'tusakimu-pos.up.railway.app']
+    CSRF_TRUSTED_ORIGINS = [
+        'https://*.railway.app',
+        'https://tusakimu-pos.up.railway.app',
+    ]
+else:
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
+    CSRF_TRUSTED_ORIGINS = [
+        'http://localhost:8000',
+        'http://127.0.0.1:8000',
+        'http://0.0.0.0:8000',
+    ]
 
 # =======================
 # INSTALLED APPS
@@ -45,7 +53,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize',
     'django.contrib.sites',
-    # 'rosetta',  # REMOVED - No longer needed (was for translations)
+    'whitenoise.runserver_nostatic',  # Add whitenoise for static files
     'rest_framework',
     'rest_framework.authtoken',
     'allauth',
@@ -64,8 +72,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Add whitenoise - IMPORTANT: after security, before others
     'django.contrib.sessions.middleware.SessionMiddleware',
-    # 'django.middleware.locale.LocaleMiddleware',  # REMOVED - No translations needed
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -96,7 +104,6 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-                # 'django.template.context_processors.i18n',  # REMOVED - No translations
                 'core.context_processors.user_locations',
             ],
             'debug': DEBUG,
@@ -107,27 +114,28 @@ TEMPLATES = [
 WSGI_APPLICATION = 'teba.wsgi.application'
 
 # =======================
-# DATABASE - Force SQLite for Local
+# DATABASE - PostgreSQL for Railway, SQLite for Local
 # =======================
 
-# =======================
-# DATABASE - PostgreSQL for Railway
-# =======================
+if IS_RAILWAY:
+    # Use Railway PostgreSQL
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+else:
+    # Use SQLite for local development
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
-import dj_database_url
-
-# Railway PostgreSQL connection string
-DATABASE_URL = 'postgresql://postgres:cSGoxJEywsZbMqWEkmcDtqRpwUWQBihM@zephyr.proxy.rlwy.net:19136/railway'
-
-DATABASES = {
-    'default': dj_database_url.config(
-        default=DATABASE_URL,
-        conn_max_age=600,
-    )
-}
-
-# Add SSL requirement for secure connection
-DATABASES['default']['OPTIONS'] = {'sslmode': 'require'}
 # =======================
 # PASSWORD VALIDATION
 # =======================
@@ -143,29 +151,17 @@ AUTH_PASSWORD_VALIDATORS = [
 # INTERNATIONALIZATION - ENGLISH ONLY
 # =======================
 
-# Force English only
 LANGUAGE_CODE = 'en-us'
-
-# Single language only - English
-LANGUAGES = [
-    ('en', 'English'),
-]
-
-# Disable internationalization completely
+LANGUAGES = [('en', 'English')]
 USE_I18N = False
 USE_L10N = False
-
-# Timezone settings
-TIME_ZONE = 'Africa/Kampala'  # Uganda timezone
+TIME_ZONE = 'Africa/Kampala'
 USE_TZ = True
 
 # Number formatting
 USE_THOUSAND_SEPARATOR = True
 THOUSAND_SEPARATOR = ','
 NUMBER_GROUPING = 3
-
-# Remove locale paths (not needed)
-# LOCALE_PATHS = [BASE_DIR / 'locale']  # REMOVED
 
 # =======================
 # STATIC FILES
@@ -178,8 +174,18 @@ STATICFILES_DIRS = [
     BASE_DIR / 'core' / 'static',
 ]
 
-# Use simple static storage for development
-STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+# Use whitenoise for static files in production
+if IS_RAILWAY:
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+else:
+    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+
+# =======================
+# MEDIA FILES
+# =======================
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # =======================
 # AUTHENTICATION
@@ -195,11 +201,23 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_AGE = 86400
 SESSION_SAVE_EVERY_REQUEST = True
 
-# LOCAL DEVELOPMENT - All security disabled
-SESSION_COOKIE_SECURE = False
-CSRF_COOKIE_SECURE = False
-SECURE_BROWSER_XSS_FILTER = False
-SECURE_CONTENT_TYPE_NOSNIFF = False
+# Security settings - different for development vs production
+if IS_RAILWAY:
+    # Production security settings
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+else:
+    # Development security settings (disabled)
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+    SECURE_BROWSER_XSS_FILTER = False
+    SECURE_CONTENT_TYPE_NOSNIFF = False
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
@@ -210,13 +228,13 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 # AXES - Disabled for Development
 # =======================
 
-AXES_ENABLED = False  # Disable for development
-AXES_FAILURE_LIMIT = 100
+AXES_ENABLED = not IS_RAILWAY  # Disable for local, enable for production
+AXES_FAILURE_LIMIT = 5
 AXES_RESET_ON_SUCCESS = True
 AXES_LOCKOUT_TEMPLATE = 'account/lockout.html'
 
 # =======================
-# ALLAUTH CONFIGURATION - USERNAME LOGIN
+# ALLAUTH CONFIGURATION
 # =======================
 
 SITE_ID = 1
@@ -238,22 +256,32 @@ LOGOUT_REDIRECT_URL = '/'
 LOGIN_URL = '/accounts/login/'
 
 # =======================
-# EMAIL CONFIGURATION - Console for Development
+# EMAIL CONFIGURATION
 # =======================
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+if IS_RAILWAY:
+    # Use console email for Railway (you can later configure SMTP)
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
 EMAIL_HOST = 'localhost'
 EMAIL_PORT = 1025
-DEFAULT_FROM_EMAIL = 'dev@tusakimu.com'  # Updated company name
+DEFAULT_FROM_EMAIL = 'noreply@tusakimu.com'
 
 # =======================
 # SITE CONFIGURATION
 # =======================
 
-SITE_NAME = "Tusakimu Enterprises Inventory Management"  # Updated company name
-SITE_DOMAIN = "http://localhost:8000"
-SUPPORT_EMAIL = 'support@tusakimu.com'  # Updated email
-ADMIN_EMAIL = 'admin@tusakimu.com'  # Updated email
+if IS_RAILWAY:
+    SITE_NAME = "Tusakimu Enterprises Inventory Management"
+    SITE_DOMAIN = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'https://tusakimu-pos.up.railway.app')
+else:
+    SITE_NAME = "Tusakimu Enterprises Inventory Management (Development)"
+    SITE_DOMAIN = "http://localhost:8000"
+
+SUPPORT_EMAIL = 'support@tusakimu.com'
+ADMIN_EMAIL = 'admin@tusakimu.com'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -261,28 +289,45 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ADDITIONAL FIXES FOR JAVASCRIPT
 # =======================
 
-# Fix MIME types for JavaScript
 import mimetypes
 mimetypes.add_type("application/javascript", ".js", True)
-
-# Disable any content security policy
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 # =======================
-# REMOVE ROSETTA URLS
+# LOGGING (Optional - for debugging production)
 # =======================
-# Note: Remove 'rosetta/' from your main urls.py as well
+
+if IS_RAILWAY:
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+            },
+        },
+        'root': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'loggers': {
+            'django': {
+                'handlers': ['console'],
+                'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+            },
+        },
+    }
 
 # =======================
 # DEBUG OUTPUT
 # =======================
 
 print("=" * 50)
-print("TUSAKIMU ENTERPRISES - LOCAL DEVELOPMENT SETTINGS")
+print("TUSAKIMU ENTERPRISES - SETTINGS LOADED")
 print("=" * 50)
+print(f"Environment: {'RAILWAY (Production)' if IS_RAILWAY else 'LOCAL (Development)'}")
 print(f"Debug Mode: {DEBUG}")
-print(f"Language: ENGLISH ONLY (French Removed)")
 print(f"Database: {DATABASES['default']['ENGINE']}")
-print(f"Static Files: Development mode")
-print(f"Security Headers: DISABLED for development")
+print(f"Static Files: {'Whitenoise (Production)' if IS_RAILWAY else 'Development mode'}")
+print(f"Security Headers: {'ENABLED' if IS_RAILWAY else 'DISABLED for development'}")
 print("=" * 50)
