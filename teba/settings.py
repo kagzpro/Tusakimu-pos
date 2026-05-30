@@ -114,30 +114,23 @@ TEMPLATES = [
 WSGI_APPLICATION = 'teba.wsgi.application'
 
 # =======================
-# DATABASE - PostgreSQL for Railway, SQLite for Local
+# DATABASE - PostgreSQL (Main Database)
 # =======================
 
-if IS_RAILWAY:
-    # Use Railway PostgreSQL
-    DATABASE_URL = os.environ.get('DATABASE_URL')
-    DATABASES = {
-        'default': dj_database_url.config(
-            default=DATABASE_URL,
-            conn_max_age=600,
-        )
-    }
-    # Add SSL requirement for secure connection
-    if 'OPTIONS' not in DATABASES['default']:
-        DATABASES['default']['OPTIONS'] = {}
-    DATABASES['default']['OPTIONS']['sslmode'] = 'require'
-else:
-    # Use SQLite for local development
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+# Your PostgreSQL database - MAIN DATABASE (no SQLite fallback)
+DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:cSGoxJEywsZbMqWEkmcDtqRpwUWQBihM@zephyr.proxy.rlwy.net:19136/railway')
+
+DATABASES = {
+    'default': dj_database_url.config(
+        default=DATABASE_URL,
+        conn_max_age=600,
+    )
+}
+
+# Add SSL requirement for secure connection
+if 'OPTIONS' not in DATABASES['default']:
+    DATABASES['default']['OPTIONS'] = {}
+DATABASES['default']['OPTIONS']['sslmode'] = 'require'
 
 # =======================
 # PASSWORD VALIDATION
@@ -204,23 +197,34 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_AGE = 86400
 SESSION_SAVE_EVERY_REQUEST = True
 
-# Security settings - different for development vs production
+# =======================
+# SECURITY SETTINGS - FIXED (No redirect loop)
+# =======================
+
+# CRITICAL: Set SECURE_SSL_REDIRECT to False for Railway
+# Railway handles SSL at the edge, so internal redirect causes loops
+SECURE_SSL_REDIRECT = False
+
 if IS_RAILWAY:
-    # Production security settings
+    # Railway provides HTTPS at the edge, so we can set these to True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_SSL_REDIRECT = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+    
+    # Trust the proxy headers from Railway
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
 else:
-    # Development security settings (disabled)
+    # Development security settings (all disabled)
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
     SECURE_BROWSER_XSS_FILTER = False
     SECURE_CONTENT_TYPE_NOSNIFF = False
+    SECURE_HSTS_SECONDS = 0
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
@@ -254,7 +258,7 @@ ACCOUNT_SESSION_REMEMBER = True
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = False
 ACCOUNT_CONFIRM_EMAIL_ON_GET = False
 
-LOGIN_REDIRECT_URL = '/inventory/'
+LOGIN_REDIRECT_URL = '/inventory/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 LOGIN_URL = '/accounts/login/'
 
@@ -327,5 +331,5 @@ print(f"Environment: {'RAILWAY (Production)' if IS_RAILWAY else 'LOCAL (Developm
 print(f"Debug Mode: {DEBUG}")
 print(f"Database: {DATABASES['default']['ENGINE']}")
 print(f"Static Files: {'Whitenoise (Production)' if IS_RAILWAY else 'Development mode'}")
-print(f"Security Headers: {'ENABLED' if IS_RAILWAY else 'DISABLED for development'}")
+print(f"SECURE_SSL_REDIRECT: {SECURE_SSL_REDIRECT}")
 print("=" * 50)
