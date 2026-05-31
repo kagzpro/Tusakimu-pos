@@ -65,20 +65,20 @@
     <!-- Quick Stats -->
     <div class="row mb-4">
         <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-start border-danger border-4 bg-white h-100">
+            <div class="card border-start border-danger border-4 bg-dark h-100">
                 <div class="card-body">
                     <div class="row align-items-center">
                         <div class="col mr-2">
                             <div class="text-xs fw-bold text-danger text-uppercase mb-1">
                                 Manual Debt
                             </div>
-                            <div class="h5 mb-0 fw-bold text-gray-800">
-                                CDF {{ customer.balance|floatformat:0|intcomma }}
+                            <div class="h5 mb-0 fw-bold text-white">
+                                UGX {{ customer.balance|floatformat:0|intcomma }}
                             </div>
                             <small class="text-muted">General customer debt</small>
                         </div>
                         <div class="col-auto">
-                            <i class="fas fa-money-bill-wave fa-2x text-gray-300"></i>
+                            <i class="fas fa-money-bill-wave fa-2x text-gray-500"></i>
                         </div>
                     </div>
                 </div>
@@ -86,20 +86,20 @@
         </div>
 
         <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-start border-warning border-4 bg-white h-100">
+            <div class="card border-start border-warning border-4 bg-dark h-100">
                 <div class="card-body">
                     <div class="row align-items-center">
                         <div class="col mr-2">
                             <div class="text-xs fw-bold text-warning text-uppercase mb-1">
                                 Invoice Balance
                             </div>
-                            <div class="h5 mb-0 fw-bold text-gray-800">
-                                CDF {{ total_balance|floatformat:0|intcomma }}
+                            <div class="h5 mb-0 fw-bold text-white">
+                                UGX {{ total_balance|floatformat:0|intcomma }}
                             </div>
                             <small class="text-muted">{{ unpaid_sales|length }} unpaid invoices</small>
                         </div>
                         <div class="col-auto">
-                            <i class="fas fa-file-invoice-dollar fa-2x text-gray-300"></i>
+                            <i class="fas fa-file-invoice-dollar fa-2x text-gray-500"></i>
                         </div>
                     </div>
                 </div>
@@ -107,20 +107,20 @@
         </div>
 
         <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-start border-info border-4 bg-white h-100">
+            <div class="card border-start border-info border-4 bg-dark h-100">
                 <div class="card-body">
                     <div class="row align-items-center">
                         <div class="col mr-2">
                             <div class="text-xs fw-bold text-info text-uppercase mb-1">
                                 Total Sales
                             </div>
-                            <div class="h5 mb-0 fw-bold text-gray-800">
-                                CDF {{ total_sales_amount|floatformat:0|intcomma }}
+                            <div class="h5 mb-0 fw-bold text-white">
+                                UGX {{ total_sales_amount|floatformat:0|intcomma }}
                             </div>
                             <small class="text-muted">{{ total_sales_count }} invoices</small>
                         </div>
                         <div class="col-auto">
-                            <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                            <i class="fas fa-chart-line fa-2x text-gray-500"></i>
                         </div>
                     </div>
                 </div>
@@ -128,20 +128,20 @@
         </div>
 
         <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-start border-success border-4 bg-white h-100">
+            <div class="card border-start border-success border-4 bg-dark h-100">
                 <div class="card-body">
                     <div class="row align-items-center">
                         <div class="col mr-2">
                             <div class="text-xs fw-bold text-success text-uppercase mb-1">
                                 Total Paid
                             </div>
-                            <div class="h5 mb-0 fw-bold text-gray-800">
-                                CDF {{ total_paid_amount|floatformat:0|intcomma }}
+                            <div class="h5 mb-0 fw-bold text-white">
+                                UGX {{ total_paid_amount|floatformat:0|intcomma }}
                             </div>
                             <small class="text-muted">Amount received</small>
                         </div>
                         <div class="col-auto">
-                            <i class="fas fa-check-circle fa-2x text-gray-300"></i>
+                            <i class="fas fa-check-circle fa-2x text-gray-500"></i>
                         </div>
                     </div>
                 </div>
@@ -236,26 +236,26 @@
                             <tbody>
                                 {% for transaction in debt_transactions %}
                                 <tr class="{% if transaction.transaction_type == 'supply' %}table-warning{% else %}table-success{% endif %}">
-                                    <td>{{ transaction.created_at|date:"M d, Y" }}</td>
+                                    <td>{{ transaction.created_at|date:"M d, Y" }}</span></td>
                                     <td>
                                         <span class="badge {% if transaction.transaction_type == 'supply' %}bg-warning{% else %}bg-success{% endif %}">
                                             {{ transaction.get_transaction_type_display }}
                                         </span>
-                                    </td>
+                                    </span></td>
                                     <td>
                                         <strong class="{% if transaction.transaction_type == 'supply' %}text-warning{% else %}text-success{% endif %}">
-                                            CDF {{ transaction.amount|floatformat:0|intcomma }}
+                                            UGX {{ transaction.amount|floatformat:0|intcomma }}
                                         </strong>
-                                    </td>
+                                    </span></td>
                                     <td>
                                         <small class="text-muted">{{ transaction.reference|default:"-" }}</small>
-                                    </td>
+                                    </span></td>
                                     <td>
                                         <small>{{ transaction.notes|truncatewords:5|default:"-" }}</small>
-                                    </td>
+                                    </span></td>
                                     <td>
                                         <small class="text-muted">{{ transaction.created_by.username|default:"System" }}</small>
-                                    </td>
+                                    </span></td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -298,9 +298,9 @@
                                 <tr>
                                     <th>Invoice #</th>
                                     <th>Date</th>
-                                    <th>Total</th>
-                                    <th>Paid</th>
-                                    <th>Balance</th>
+                                    <th>Total (UGX)</th>
+                                    <th>Paid (UGX)</th>
+                                    <th>Balance (UGX)</th>
                                     <th>Status</th>
                                     <th>Payment Actions</th>
                                 </tr>
@@ -310,23 +310,23 @@
                                 {% with balance_due=sale.balance_due %}
                                 <tr class="{% if balance_due > 0 %}{% if sale.due_date and sale.due_date < today %}table-danger{% else %}table-warning{% endif %}{% endif %}">
                                     <td>
-                                        <strong class="{% if balance_due > 0 %}text-dark{% else %}text-muted{% endif %}">
+                                        <strong class="{% if balance_due > 0 %}text-white{% else %}text-muted{% endif %}">
                                             {{ sale.document_number }}
                                         </strong>
                                         {% if sale.due_date and sale.due_date < today and balance_due > 0 %}
                                         <span class="badge bg-danger ms-1">Overdue</span>
                                         {% endif %}
-                                    </td>
-                                    <td>{{ sale.date|date:"M d, Y" }}</td>
+                                    </span></td>
+                                    <td>{{ sale.date|date:"M d, Y" }}</span></td>
                                     <td>
-                                        <strong>CDF {{ sale.total_amount|floatformat:0|intcomma }}</strong>
-                                    </td>
-                                    <td>CDF {{ sale.paid_amount|default:0|floatformat:0|intcomma }}</td>
+                                        <strong>UGX {{ sale.total_amount|floatformat:0|intcomma }}</strong>
+                                    </span></td>
+                                    <td>UGX {{ sale.paid_amount|default:0|floatformat:0|intcomma }}</span></td>
                                     <td>
                                         <strong class="{% if balance_due > 0 %}text-danger{% else %}text-success{% endif %}">
-                                            CDF {{ balance_due|floatformat:0|intcomma }}
+                                            UGX {{ balance_due|floatformat:0|intcomma }}
                                         </strong>
-                                    </td>
+                                    </span></td>
                                     <td>
                                         {% if balance_due == 0 %}
                                         <span class="badge bg-success">Paid</span>
@@ -335,17 +335,15 @@
                                         {% else %}
                                         <span class="badge bg-warning">Partial</span>
                                         {% endif %}
-                                    </td>
+                                    </span></td>
                                     <td>
                                         <div class="btn-group btn-group-sm">
-                                            <!-- View Payments -->
                                             <a href="{% url 'inventory:sale_payments' sale.id %}" 
                                                class="btn btn-outline-primary" 
                                                title="View payment history">
                                                 <i class="fas fa-history"></i>
                                             </a>
                                             
-                                            <!-- Pay Invoice (only if balance due) -->
                                             {% if balance_due > 0 %}
                                             <a href="{% url 'transactions:receive_unified_payment' customer.id %}?sale_id={{ sale.id }}" 
                                                class="btn btn-outline-success" 
@@ -358,7 +356,6 @@
                                             </button>
                                             {% endif %}
                                             
-                                            <!-- Print Invoice -->
                                             <a href="{% url 'inventory:print_sale' sale.id %}" 
                                                class="btn btn-outline-info" 
                                                title="Print invoice" 
@@ -366,7 +363,7 @@
                                                 <i class="fas fa-print"></i>
                                             </a>
                                         </div>
-                                    </td>
+                                    </span></td>
                                 </tr>
                                 {% endwith %}
                                 {% endfor %}
@@ -400,20 +397,19 @@
                     <div class="mb-3">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="fw-bold">Manual Debt:</span>
-                            <span class="text-danger fw-bold">CDF {{ customer.balance|floatformat:0|intcomma }}</span>
+                            <span class="text-danger fw-bold">UGX {{ customer.balance|floatformat:0|intcomma }}</span>
                         </div>
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="fw-bold">Invoice Balance:</span>
-                            <span class="text-warning fw-bold">CDF {{ total_balance|floatformat:0|intcomma }}</span>
+                            <span class="text-warning fw-bold">UGX {{ total_balance|floatformat:0|intcomma }}</span>
                         </div>
                         <hr>
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="fw-bold">Total Owed:</span>
-                            <span class="text-danger fw-bold fs-5">CDF {{ customer.total_balance|floatformat:0|intcomma }}</span>
+                            <span class="text-danger fw-bold fs-5">UGX {{ customer.total_balance|floatformat:0|intcomma }}</span>
                         </div>
                     </div>
                     
-                    <!-- Quick Unified Payment -->
                     <div class="mt-4">
                         <a href="{% url 'transactions:receive_unified_payment' customer.id %}" 
                            class="btn btn-success w-100 py-3 fw-bold">
@@ -428,15 +424,15 @@
                         <h6 class="fw-bold mb-2">Unpaid Invoices:</h6>
                         <div class="list-group list-group-flush">
                             {% for sale in unpaid_sales|slice:":3" %}
-                            <div class="list-group-item px-0 py-2">
+                            <div class="list-group-item px-0 py-2 bg-dark">
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
-                                        <small class="fw-bold">{{ sale.document_number }}</small>
+                                        <small class="fw-bold text-white">{{ sale.document_number }}</small>
                                         <br>
                                         <small class="text-muted">{{ sale.date|date:"M d, Y" }}</small>
                                     </div>
                                     <div class="text-end">
-                                        <small class="text-danger fw-bold">CDF {{ sale.balance_due|floatformat:0|intcomma }}</small>
+                                        <small class="text-danger fw-bold">UGX {{ sale.balance_due|floatformat:0|intcomma }}</small>
                                         <br>
                                         <a href="{% url 'transactions:receive_unified_payment' customer.id %}?sale_id={{ sale.id }}" 
                                            class="btn btn-sm btn-success mt-1">
@@ -468,10 +464,10 @@
                     {% if recent_payments %}
                     <div class="list-group list-group-flush">
                         {% for payment in recent_payments %}
-                        <div class="list-group-item px-0 py-2">
+                        <div class="list-group-item px-0 py-2 bg-dark">
                             <div class="d-flex justify-content-between align-items-start">
                                 <div>
-                                    <h6 class="mb-1 text-success">CDF {{ payment.amount|floatformat:0|intcomma }}</h6>
+                                    <h6 class="mb-1 text-success">UGX {{ payment.amount|floatformat:0|intcomma }}</h6>
                                     <small class="text-muted">
                                         <i class="fas fa-calendar me-1"></i>{{ payment.payment_date|date:"M d, Y" }}
                                     </small>
@@ -512,20 +508,20 @@
                 </div>
                 <div class="card-body">
                     <dl class="row mb-0">
-                        <dt class="col-sm-5">Customer Since:</dt>
-                        <dd class="col-sm-7">{{ customer.created_at|date:"M d, Y"|default:"Unknown" }}</dd>
+                        <dt class="col-sm-5 text-muted">Customer Since:</dt>
+                        <dd class="col-sm-7 text-white">{{ customer.created_at|date:"M d, Y"|default:"Unknown" }}</dd>
 
-                        <dt class="col-sm-5">Total Invoices:</dt>
-                        <dd class="col-sm-7">{{ total_sales_count }}</dd>
+                        <dt class="col-sm-5 text-muted">Total Invoices:</dt>
+                        <dd class="col-sm-7 text-white">{{ total_sales_count }}</dd>
 
-                        <dt class="col-sm-5">Unpaid Invoices:</dt>
+                        <dt class="col-sm-5 text-muted">Unpaid Invoices:</dt>
                         <dd class="col-sm-7 text-warning">{{ unpaid_sales|length }}</dd>
 
-                        <dt class="col-sm-5">Overdue Balance:</dt>
-                        <dd class="col-sm-7 text-danger">CDF {{ overdue_balance|floatformat:0|intcomma }}</dd>
+                        <dt class="col-sm-5 text-muted">Overdue Balance:</dt>
+                        <dd class="col-sm-7 text-danger">UGX {{ overdue_balance|floatformat:0|intcomma }}</dd>
 
-                        <dt class="col-sm-5">Last Activity:</dt>
-                        <dd class="col-sm-7">
+                        <dt class="col-sm-5 text-muted">Last Activity:</dt>
+                        <dd class="col-sm-7 text-white">
                             {% if sales.0 %}
                                 {{ sales.0.date|date:"M d, Y" }}
                             {% else %}
@@ -534,8 +530,7 @@
                         </dd>
                     </dl>
                     
-                    <!-- Quick Debt Actions -->
-                    <div class="mt-3 pt-3 border-top">
+                    <div class="mt-3 pt-3 border-top border-secondary">
                         <div class="row g-2">
                             <div class="col-6">
                                 <a href="{% url 'transactions:add_customer_debt' customer.id %}" 
@@ -557,19 +552,18 @@
     </div>
 </div>
 
-<!-- JavaScript for enhanced functionality -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // Add confirmation for large payments
     const paymentLinks = document.querySelectorAll('a[href*="receive-unified-payment"]');
     paymentLinks.forEach(link => {
         link.addEventListener('click', function(e) {
-            const manualDebt = {{ customer.balance }};
-            const invoiceBalance = {{ total_balance }};
+            const manualDebt = {{ customer.balance|default:0 }};
+            const invoiceBalance = {{ total_balance|default:0 }};
             const totalOwed = manualDebt + invoiceBalance;
             
             if (totalOwed > 1000000) {
-                if (!confirm(`This customer owes CDF ${totalOwed.toLocaleString()} in total.\n\nManual Debt: CDF ${manualDebt.toLocaleString()}\nInvoice Balance: CDF ${invoiceBalance.toLocaleString()}\n\nContinue to payment?`)) {
+                if (!confirm(`This customer owes UGX ${totalOwed.toLocaleString()} in total.\n\nManual Debt: UGX ${manualDebt.toLocaleString()}\nInvoice Balance: UGX ${invoiceBalance.toLocaleString()}\n\nContinue to payment?`)) {
                     e.preventDefault();
                 }
             }
@@ -594,7 +588,7 @@ document.addEventListener('DOMContentLoaded', function() {
 .card {
     border: none;
     border-radius: 12px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
 }
 
 .card-header {
@@ -604,11 +598,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
 .btn-group .dropdown-menu {
     border-radius: 8px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    background: var(--card);
+}
+
+.dropdown-item {
+    color: var(--muted);
+}
+
+.dropdown-item:hover {
+    background: var(--accent);
+    color: white;
 }
 
 .table-hover tbody tr:hover {
-    background-color: rgba(13, 110, 253, 0.04);
+    background-color: rgba(79, 70, 229, 0.1);
     transform: translateY(-1px);
     transition: all 0.2s ease;
 }
@@ -619,12 +623,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
 .list-group-item {
     border: none;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid #1e293b;
     transition: all 0.2s ease;
+    background: var(--card);
+    color: var(--muted);
 }
 
 .list-group-item:hover {
-    background-color: #f8f9fa;
+    background-color: #1e293b;
 }
 
 .list-group-item:last-child {
@@ -632,15 +638,15 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 
 .btn-success {
-    background: linear-gradient(135deg, #198754 0%, #157347 100%);
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
     border: none;
     transition: all 0.3s ease;
 }
 
 .btn-success:hover {
-    background: linear-gradient(135deg, #157347 0%, #0f5132 100%);
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
     transform: translateY(-2px);
-    box-shadow: 0 4px 15px rgba(21, 115, 71, 0.3);
+    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
 }
 
 .quick-action-btn {
@@ -650,19 +656,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
 .quick-action-btn:hover {
     transform: translateY(-3px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2);
 }
 
 .table-warning {
-    background-color: rgba(255, 193, 7, 0.05) !important;
+    background-color: rgba(245, 158, 11, 0.1) !important;
 }
 
 .table-danger {
-    background-color: rgba(220, 53, 69, 0.05) !important;
+    background-color: rgba(239, 68, 68, 0.1) !important;
 }
 
 .table-success {
-    background-color: rgba(25, 135, 84, 0.05) !important;
+    background-color: rgba(16, 185, 129, 0.1) !important;
 }
 
 .fade-in {
@@ -680,18 +686,25 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 }
 
-/* Unified Payment Highlight */
 .unified-payment-highlight {
-    background: linear-gradient(135deg, #198754 0%, #20c997 100%);
+    background: linear-gradient(135deg, #10b981 0%, #14b8a6 100%);
     border: none;
     color: white;
     transition: all 0.3s ease;
 }
 
 .unified-payment-highlight:hover {
-    background: linear-gradient(135deg, #157347 0%, #1aa179 100%);
+    background: linear-gradient(135deg, #059669 0%, #0d9488 100%);
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(32, 201, 151, 0.3);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.3);
+}
+
+.text-muted {
+    color: var(--muted) !important;
+}
+
+.text-white {
+    color: white !important;
 }
 </style>
 {% endblock %}
