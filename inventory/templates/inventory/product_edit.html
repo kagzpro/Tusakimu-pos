@@ -144,7 +144,7 @@
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Cost Price (UGX)</label>
-                                    <input type="text" class="form-control unit-cost-price" value="{% widthratio product.cost_price unit.quantity_in_base 1 %}" readonly disabled style="background-color: #e9ecef;">
+                                    <input type="text" class="form-control unit-cost-price" value="{{ unit.cost_price|default:unit.get_cost_price|default:0 }}" readonly disabled style="background-color: #e9ecef;">
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Selling Price (UGX) *</label>
@@ -152,7 +152,7 @@
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Price per {{ product.base_unit }}</label>
-                                    <input type="text" class="form-control price-per-base" value="{% widthratio unit.selling_price unit.quantity_in_base 1 %}" readonly disabled style="background-color: #e9ecef;">
+                                    <input type="text" class="form-control price-per-base" value="{% if unit.selling_price and unit.quantity_in_base %}{{ unit.selling_price|floatformat:2|add:'/'|add:unit.quantity_in_base|add:'=' }}{% widthratio unit.selling_price unit.quantity_in_base 1 %}{% else %}0{% endif %}" readonly disabled style="background-color: #e9ecef;">
                                 </div>
                                 <div class="col-md-1 d-flex align-items-end">
                                     <div class="form-check me-2">
@@ -243,6 +243,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const baseCostPrice = document.getElementById('costPrice');
     const baseSellingPrice = document.getElementById('baseSellingPrice');
     
+    // Store original values to prevent loss
+    let originalUnitData = {};
+    
     // Function to recalculate cost price for a unit
     function recalculateCostPrice(row) {
         const quantityInput = row.querySelector('.unit-quantity');
@@ -268,7 +271,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (quantity > 0) {
                 pricePerBaseField.value = (sellingPrice / quantity).toFixed(2);
             } else {
-                pricePerBaseField.value = '';
+                pricePerBaseField.value = '0';
             }
         }
     }
@@ -294,16 +297,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Update all units when base selling price changes
+    // Update all units when base selling price changes (only if not manually edited)
     function updateAllSellingPrices() {
         document.querySelectorAll('.unit-row').forEach(row => {
             const quantityInput = row.querySelector('.unit-quantity');
             const sellingPriceInput = row.querySelector('.unit-selling-price');
             if (quantityInput && sellingPriceInput) {
-                const quantity = parseFloat(quantityInput.value) || 0;
-                const basePrice = parseFloat(baseSellingPrice.value) || 0;
                 // Only auto-update if the price hasn't been manually edited
                 if (!sellingPriceInput.hasAttribute('data-manual-edited')) {
+                    const quantity = parseFloat(quantityInput.value) || 0;
+                    const basePrice = parseFloat(baseSellingPrice.value) || 0;
                     sellingPriceInput.value = (basePrice * quantity).toFixed(2);
                     recalculatePricePerBase(row);
                 }
@@ -312,14 +315,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Listen to base cost price changes
-    baseCostPrice.addEventListener('input', function() {
-        updateAllCostPrices();
-    });
+    if (baseCostPrice) {
+        baseCostPrice.addEventListener('input', function() {
+            updateAllCostPrices();
+        });
+    }
     
     // Listen to base selling price changes
-    baseSellingPrice.addEventListener('input', function() {
-        updateAllSellingPrices();
-    });
+    if (baseSellingPrice) {
+        baseSellingPrice.addEventListener('input', function() {
+            updateAllSellingPrices();
+        });
+    }
     
     // Remove alert if it exists and we have units
     if (noUnitsAlert && {{ units|length }} > 0) {
@@ -331,6 +338,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const quantityInput = row.querySelector('.unit-quantity');
         const sellingPriceInput = row.querySelector('.unit-selling-price');
         
+        // Store original selling price to prevent loss
+        if (sellingPriceInput && sellingPriceInput.value) {
+            originalUnitData[row.dataset.unitId || 'new'] = {
+                sellingPrice: sellingPriceInput.value
+            };
+        }
+        
         if (quantityInput) {
             quantityInput.addEventListener('input', function() {
                 recalculateCostPrice(row);
@@ -338,6 +352,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Reset manual edit flag when quantity changes
                 if (sellingPriceInput) {
                     sellingPriceInput.removeAttribute('data-manual-edited');
+                    // Auto-calculate based on base price
+                    const quantity = parseFloat(quantityInput.value) || 0;
+                    const basePrice = parseFloat(baseSellingPrice.value) || 0;
+                    sellingPriceInput.value = (basePrice * quantity).toFixed(2);
+                    recalculatePricePerBase(row);
                 }
             });
         }
@@ -347,6 +366,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 this.setAttribute('data-manual-edited', 'true');
                 recalculatePricePerBase(row);
             });
+            
+            // Restore original value if it exists
+            if (originalUnitData[row.dataset.unitId] && originalUnitData[row.dataset.unitId].sellingPrice) {
+                sellingPriceInput.value = originalUnitData[row.dataset.unitId].sellingPrice;
+            }
         }
         
         // Auto-price buttons
@@ -355,7 +379,9 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.addEventListener('click', function() {
                 const multiplier = parseFloat(this.dataset.multiplier);
                 autoCalculateSellingPrice(row, multiplier);
-                sellingPriceInput.setAttribute('data-manual-edited', 'true');
+                if (sellingPriceInput) {
+                    sellingPriceInput.setAttribute('data-manual-edited', 'true');
+                }
             });
         });
         
@@ -376,109 +402,128 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Add new unit row
-    addUnitBtn.addEventListener('click', function() {
-        unitCounter++;
-        
-        if (noUnitsAlert) {
-            noUnitsAlert.style.display = 'none';
-        }
-        
-        const newRow = document.createElement('div');
-        newRow.className = 'unit-row mb-3 p-3 border rounded';
-        newRow.innerHTML = `
-            <div class="row align-items-end">
-                <div class="col-md-3">
-                    <label class="form-label">Unit Name *</label>
-                    <select name="unit_name[]" class="form-control unit-name-select" required>
-                        <option value="">Select unit type...</option>
-                        <option value="piece">Piece (pc)</option>
-                        <option value="packet">Packet (pkt)</option>
-                        <option value="carton">Carton (ctn)</option>
-                        <option value="box">Box (box)</option>
-                        <option value="dozen">Dozen (doz)</option>
-                        <option value="gross">Gross (gr)</option>
-                        <option value="roll">Roll (roll)</option>
-                        <option value="bundle">Bundle (bdl)</option>
-                        <option value="set">Set (set)</option>
-                        <option value="pair">Pair (pr)</option>
-                        <option value="bag">Bag (bag)</option>
-                        <option value="bottle">Bottle (btl)</option>
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Quantity in Base *</label>
-                    <input type="number" step="0.01" name="unit_quantity[]" class="form-control unit-quantity" placeholder="e.g., 50" required>
-                    <small class="text-muted">= X ${baseUnit}s</small>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Cost Price (UGX)</label>
-                    <input type="text" class="form-control unit-cost-price" readonly disabled style="background-color: #e9ecef;">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Selling Price (UGX) *</label>
-                    <input type="number" step="0.01" name="unit_price[]" class="form-control unit-selling-price" required>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Price per ${baseUnit}</label>
-                    <input type="text" class="form-control price-per-base" readonly disabled style="background-color: #e9ecef;">
-                </div>
-                <div class="col-md-1 d-flex align-items-end">
-                    <div class="form-check me-2">
-                        <input type="checkbox" name="unit_default[]" value="new_${unitCounter}" class="form-check-input" id="default_new_${unitCounter}">
-                        <label class="form-check-label small" for="default_new_${unitCounter}">Default</label>
+    if (addUnitBtn) {
+        addUnitBtn.addEventListener('click', function() {
+            unitCounter++;
+            
+            if (noUnitsAlert) {
+                noUnitsAlert.style.display = 'none';
+            }
+            
+            const newRow = document.createElement('div');
+            newRow.className = 'unit-row mb-3 p-3 border rounded';
+            newRow.setAttribute('data-unit-id', `new_${unitCounter}`);
+            newRow.innerHTML = `
+                <div class="row align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label">Unit Name *</label>
+                        <select name="unit_name[]" class="form-control unit-name-select" required>
+                            <option value="">Select unit type...</option>
+                            <option value="piece">Piece (pc)</option>
+                            <option value="packet">Packet (pkt)</option>
+                            <option value="carton">Carton (ctn)</option>
+                            <option value="box">Box (box)</option>
+                            <option value="dozen">Dozen (doz)</option>
+                            <option value="gross">Gross (gr)</option>
+                            <option value="roll">Roll (roll)</option>
+                            <option value="bundle">Bundle (bdl)</option>
+                            <option value="set">Set (set)</option>
+                            <option value="pair">Pair (pr)</option>
+                            <option value="bag">Bag (bag)</option>
+                            <option value="bottle">Bottle (btl)</option>
+                        </select>
                     </div>
-                    <button type="button" class="btn btn-danger btn-sm remove-unit-btn">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="row mt-2">
-                <div class="col-md-12">
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.9">10% off</button>
-                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.95">5% off</button>
-                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.0">Base price</button>
-                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.05">+5%</button>
-                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.10">+10%</button>
+                    <div class="col-md-2">
+                        <label class="form-label">Quantity in Base *</label>
+                        <input type="number" step="0.01" name="unit_quantity[]" class="form-control unit-quantity" placeholder="e.g., 50" required>
+                        <small class="text-muted">= X ${baseUnit}s</small>
                     </div>
-                    <small class="text-muted ms-2">Quick price adjustments</small>
+                    <div class="col-md-2">
+                        <label class="form-label">Cost Price (UGX)</label>
+                        <input type="text" class="form-control unit-cost-price" readonly disabled style="background-color: #e9ecef;">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Selling Price (UGX) *</label>
+                        <input type="number" step="0.01" name="unit_price[]" class="form-control unit-selling-price" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Price per ${baseUnit}</label>
+                        <input type="text" class="form-control price-per-base" readonly disabled style="background-color: #e9ecef;">
+                    </div>
+                    <div class="col-md-1 d-flex align-items-end">
+                        <div class="form-check me-2">
+                            <input type="checkbox" name="unit_default[]" value="new_${unitCounter}" class="form-check-input" id="default_new_${unitCounter}">
+                            <label class="form-check-label small" for="default_new_${unitCounter}">Default</label>
+                        </div>
+                        <button type="button" class="btn btn-danger btn-sm remove-unit-btn">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
                 </div>
-            </div>
-            <input type="hidden" name="unit_id[]" value="">
-        `;
-        
-        unitsContainer.appendChild(newRow);
-        setupRowEvents(newRow);
-        
-        // Auto-calculate based on current base prices
-        const quantityInput = newRow.querySelector('.unit-quantity');
-        const sellingPriceInput = newRow.querySelector('.unit-selling-price');
-        
-        if (quantityInput && sellingPriceInput) {
-            quantityInput.value = 1;
-            const basePrice = parseFloat(baseSellingPrice.value) || 0;
-            sellingPriceInput.value = (basePrice * 1).toFixed(2);
-            recalculateCostPrice(newRow);
-            recalculatePricePerBase(newRow);
-        }
-    });
+                <div class="row mt-2">
+                    <div class="col-md-12">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.9">10% off</button>
+                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.95">5% off</button>
+                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.0">Base price</button>
+                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.05">+5%</button>
+                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.10">+10%</button>
+                        </div>
+                        <small class="text-muted ms-2">Quick price adjustments</small>
+                    </div>
+                </div>
+                <input type="hidden" name="unit_id[]" value="">
+            `;
+            
+            unitsContainer.appendChild(newRow);
+            setupRowEvents(newRow);
+            
+            // Auto-calculate based on current base prices
+            const quantityInput = newRow.querySelector('.unit-quantity');
+            const sellingPriceInput = newRow.querySelector('.unit-selling-price');
+            
+            if (quantityInput && sellingPriceInput) {
+                quantityInput.value = 1;
+                const basePrice = parseFloat(baseSellingPrice.value) || 0;
+                sellingPriceInput.value = (basePrice * 1).toFixed(2);
+                recalculateCostPrice(newRow);
+                recalculatePricePerBase(newRow);
+            }
+        });
+    }
     
     // Setup existing rows
     document.querySelectorAll('.unit-row').forEach(row => {
         setupRowEvents(row);
     });
     
-    // Form submission - ensure all required fields are valid
+    // Form submission - ensure all required fields are valid and prices are preserved
     const form = document.querySelector('form');
-    form.addEventListener('submit', function(e) {
-        const defaultCheckboxes = document.querySelectorAll('input[name="unit_default[]"]:checked');
-        if (defaultCheckboxes.length === 0 && document.querySelectorAll('.unit-row').length > 0) {
-            const firstCheckbox = document.querySelector('input[name="unit_default[]"]');
-            if (firstCheckbox) {
-                firstCheckbox.checked = true;
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            // Ensure at least one default unit is selected if units exist
+            const defaultCheckboxes = document.querySelectorAll('input[name="unit_default[]"]:checked');
+            if (defaultCheckboxes.length === 0 && document.querySelectorAll('.unit-row').length > 0) {
+                const firstCheckbox = document.querySelector('input[name="unit_default[]"]');
+                if (firstCheckbox) {
+                    firstCheckbox.checked = true;
+                }
             }
-        }
-    });
+            
+            // Ensure all unit selling prices are preserved
+            document.querySelectorAll('.unit-row').forEach(row => {
+                const sellingPriceInput = row.querySelector('.unit-selling-price');
+                if (sellingPriceInput && !sellingPriceInput.value) {
+                    const quantityInput = row.querySelector('.unit-quantity');
+                    if (quantityInput && baseSellingPrice) {
+                        const quantity = parseFloat(quantityInput.value) || 0;
+                        const basePrice = parseFloat(baseSellingPrice.value) || 0;
+                        sellingPriceInput.value = (basePrice * quantity).toFixed(2);
+                    }
+                }
+            });
+        });
+    }
 });
 </script>
 
