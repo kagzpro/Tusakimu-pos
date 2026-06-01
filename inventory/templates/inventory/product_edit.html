@@ -99,7 +99,7 @@
             </div>
         </div>
 
-        <!-- Units of Measure Section - Dropdown Style -->
+        <!-- Units of Measure Section -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Units of Measure</h5>
@@ -144,7 +144,7 @@
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Cost Price (UGX)</label>
-                                    <input type="text" class="form-control unit-cost-price" value="{{ unit.cost_price|default:unit.get_cost_price|default:0 }}" readonly disabled style="background-color: #e9ecef;">
+                                    <input type="text" class="form-control unit-cost-price" value="{% widthratio product.cost_price|default:0 1 unit.quantity_in_base %}" readonly disabled style="background-color: #e9ecef;">
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Selling Price (UGX) *</label>
@@ -152,7 +152,7 @@
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Price per {{ product.base_unit }}</label>
-                                    <input type="text" class="form-control price-per-base" value="{% if unit.selling_price and unit.quantity_in_base %}{{ unit.selling_price|floatformat:2|add:'/'|add:unit.quantity_in_base|add:'=' }}{% widthratio unit.selling_price unit.quantity_in_base 1 %}{% else %}0{% endif %}" readonly disabled style="background-color: #e9ecef;">
+                                    <input type="text" class="form-control price-per-base" value="{% widthratio unit.selling_price unit.quantity_in_base 1 %}" readonly disabled style="background-color: #e9ecef;">
                                 </div>
                                 <div class="col-md-1 d-flex align-items-end">
                                     <div class="form-check me-2">
@@ -217,6 +217,8 @@
                                     {% if stock.location.id == location.id %}
                                         {{ stock.quantity }} {{ product.base_unit }}s
                                     {% endif %}
+                                {% empty %}
+                                    0 {{ product.base_unit }}s
                                 {% endfor %}
                             </small>
                         </div>
@@ -243,15 +245,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const baseCostPrice = document.getElementById('costPrice');
     const baseSellingPrice = document.getElementById('baseSellingPrice');
     
-    // Store original values to prevent loss
-    let originalUnitData = {};
+    // CRITICAL: Store original values to prevent loss
+    let originalCostPrice = baseCostPrice ? baseCostPrice.value : 0;
+    let originalSellingPrice = baseSellingPrice ? baseSellingPrice.value : 0;
     
     // Function to recalculate cost price for a unit
     function recalculateCostPrice(row) {
         const quantityInput = row.querySelector('.unit-quantity');
         const costPriceField = row.querySelector('.unit-cost-price');
         
-        if (quantityInput && costPriceField) {
+        if (quantityInput && costPriceField && baseCostPrice) {
             const quantity = parseFloat(quantityInput.value) || 0;
             const baseCost = parseFloat(baseCostPrice.value) || 0;
             const calculatedCost = baseCost * quantity;
@@ -271,7 +274,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (quantity > 0) {
                 pricePerBaseField.value = (sellingPrice / quantity).toFixed(2);
             } else {
-                pricePerBaseField.value = '0';
+                pricePerBaseField.value = '';
             }
         }
     }
@@ -281,7 +284,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const quantityInput = row.querySelector('.unit-quantity');
         const sellingPriceInput = row.querySelector('.unit-selling-price');
         
-        if (quantityInput && sellingPriceInput) {
+        if (quantityInput && sellingPriceInput && baseSellingPrice) {
             const quantity = parseFloat(quantityInput.value) || 0;
             const basePrice = parseFloat(baseSellingPrice.value) || 0;
             const calculatedPrice = basePrice * quantity * multiplier;
@@ -297,12 +300,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Update all units when base selling price changes (only if not manually edited)
+    // Update all units when base selling price changes
     function updateAllSellingPrices() {
         document.querySelectorAll('.unit-row').forEach(row => {
             const quantityInput = row.querySelector('.unit-quantity');
             const sellingPriceInput = row.querySelector('.unit-selling-price');
-            if (quantityInput && sellingPriceInput) {
+            if (quantityInput && sellingPriceInput && baseSellingPrice) {
                 // Only auto-update if the price hasn't been manually edited
                 if (!sellingPriceInput.hasAttribute('data-manual-edited')) {
                     const quantity = parseFloat(quantityInput.value) || 0;
@@ -314,16 +317,35 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Listen to base cost price changes
+    // CRITICAL: Ensure base prices are never cleared on edit
     if (baseCostPrice) {
+        // Restore original value if somehow cleared
+        if (!baseCostPrice.value || baseCostPrice.value === '') {
+            baseCostPrice.value = originalCostPrice;
+        }
+        
         baseCostPrice.addEventListener('input', function() {
+            if (!this.value || this.value === '') {
+                this.value = originalCostPrice;
+            } else {
+                originalCostPrice = this.value;
+            }
             updateAllCostPrices();
         });
     }
     
-    // Listen to base selling price changes
     if (baseSellingPrice) {
+        // Restore original value if somehow cleared
+        if (!baseSellingPrice.value || baseSellingPrice.value === '') {
+            baseSellingPrice.value = originalSellingPrice;
+        }
+        
         baseSellingPrice.addEventListener('input', function() {
+            if (!this.value || this.value === '') {
+                this.value = originalSellingPrice;
+            } else {
+                originalSellingPrice = this.value;
+            }
             updateAllSellingPrices();
         });
     }
@@ -338,13 +360,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const quantityInput = row.querySelector('.unit-quantity');
         const sellingPriceInput = row.querySelector('.unit-selling-price');
         
-        // Store original selling price to prevent loss
-        if (sellingPriceInput && sellingPriceInput.value) {
-            originalUnitData[row.dataset.unitId || 'new'] = {
-                sellingPrice: sellingPriceInput.value
-            };
-        }
-        
         if (quantityInput) {
             quantityInput.addEventListener('input', function() {
                 recalculateCostPrice(row);
@@ -352,11 +367,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Reset manual edit flag when quantity changes
                 if (sellingPriceInput) {
                     sellingPriceInput.removeAttribute('data-manual-edited');
-                    // Auto-calculate based on base price
-                    const quantity = parseFloat(quantityInput.value) || 0;
-                    const basePrice = parseFloat(baseSellingPrice.value) || 0;
-                    sellingPriceInput.value = (basePrice * quantity).toFixed(2);
-                    recalculatePricePerBase(row);
                 }
             });
         }
@@ -366,11 +376,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 this.setAttribute('data-manual-edited', 'true');
                 recalculatePricePerBase(row);
             });
-            
-            // Restore original value if it exists
-            if (originalUnitData[row.dataset.unitId] && originalUnitData[row.dataset.unitId].sellingPrice) {
-                sellingPriceInput.value = originalUnitData[row.dataset.unitId].sellingPrice;
-            }
         }
         
         // Auto-price buttons
@@ -412,7 +417,6 @@ document.addEventListener('DOMContentLoaded', function() {
             
             const newRow = document.createElement('div');
             newRow.className = 'unit-row mb-3 p-3 border rounded';
-            newRow.setAttribute('data-unit-id', `new_${unitCounter}`);
             newRow.innerHTML = `
                 <div class="row align-items-end">
                     <div class="col-md-3">
@@ -482,7 +486,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const quantityInput = newRow.querySelector('.unit-quantity');
             const sellingPriceInput = newRow.querySelector('.unit-selling-price');
             
-            if (quantityInput && sellingPriceInput) {
+            if (quantityInput && sellingPriceInput && baseSellingPrice) {
                 quantityInput.value = 1;
                 const basePrice = parseFloat(baseSellingPrice.value) || 0;
                 sellingPriceInput.value = (basePrice * 1).toFixed(2);
@@ -497,10 +501,18 @@ document.addEventListener('DOMContentLoaded', function() {
         setupRowEvents(row);
     });
     
-    // Form submission - ensure all required fields are valid and prices are preserved
+    // CRITICAL: Form submission - ensure prices are never empty
     const form = document.querySelector('form');
     if (form) {
         form.addEventListener('submit', function(e) {
+            // Ensure base prices are not empty
+            if (baseCostPrice && (!baseCostPrice.value || baseCostPrice.value === '')) {
+                baseCostPrice.value = originalCostPrice || 0;
+            }
+            if (baseSellingPrice && (!baseSellingPrice.value || baseSellingPrice.value === '')) {
+                baseSellingPrice.value = originalSellingPrice || 0;
+            }
+            
             // Ensure at least one default unit is selected if units exist
             const defaultCheckboxes = document.querySelectorAll('input[name="unit_default[]"]:checked');
             if (defaultCheckboxes.length === 0 && document.querySelectorAll('.unit-row').length > 0) {
@@ -510,10 +522,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
             
-            // Ensure all unit selling prices are preserved
+            // Ensure all unit selling prices are valid
             document.querySelectorAll('.unit-row').forEach(row => {
                 const sellingPriceInput = row.querySelector('.unit-selling-price');
-                if (sellingPriceInput && !sellingPriceInput.value) {
+                if (sellingPriceInput && (!sellingPriceInput.value || sellingPriceInput.value === '')) {
                     const quantityInput = row.querySelector('.unit-quantity');
                     if (quantityInput && baseSellingPrice) {
                         const quantity = parseFloat(quantityInput.value) || 0;
