@@ -200,7 +200,6 @@
                             <th>Unit of Measure</th>
                             <th class="text-end">Selling Price (UGX)</th>
                             <th>Stock by Location</th>
-                            <th class="text-center">Status</th>
                             <th class="text-center">Actions</th>
                         </tr>
                     </thead>
@@ -222,12 +221,8 @@
                                         </a>
                                         <div class="small text-muted">
                                             Base Unit: <strong>{{ item.product.base_unit|default:"piece" }}</strong>
+                                            | Reorder Level: <strong>{{ item.product.reorder_level|default:"0" }}</strong>
                                         </div>
-                                        {% if item.product.reorder_level and item.total_stock <= item.product.reorder_level %}
-                                        <div class="small text-warning">
-                                            <i class="fas fa-exclamation-circle"></i> Reorder at {{ item.product.reorder_level }}
-                                        </div>
-                                        {% endif %}
                                     </div>
                                 </div>
                             </td>
@@ -245,8 +240,7 @@
                                 <div class="units-container">
                                     {% if item.product.units.all %}
                                         <select class="form-select form-select-sm unit-selector" 
-                                                data-product-id="{{ item.product.id }}"
-                                                data-total-stock="{{ item.total_stock }}">
+                                                data-product-id="{{ item.product.id }}">
                                             {% for unit in item.product.units.all %}
                                             <option value="{{ unit.id }}" 
                                                     data-unit-name="{{ unit.unit_name }}"
@@ -254,27 +248,15 @@
                                                     data-selling-price="{{ unit.selling_price }}">
                                                 {{ unit.unit_name|title }} 
                                                 (1 = {{ unit.quantity_in_base }} {{ item.product.base_unit }}s)
-                                                - UGX {{ unit.selling_price|floatformat:0 }}
                                             </option>
                                             {% endfor %}
                                         </select>
-                                        <div class="small text-muted mt-1">
-                                            <i class="fas fa-info-circle"></i> 
-                                            <span class="unit-conversion-info">
-                                                {% with default_unit=item.product.units.all|first %}
-                                                1 {{ default_unit.unit_name }} = {{ default_unit.quantity_in_base }} {{ item.product.base_unit }}s
-                                                {% endwith %}
-                                            </span>
-                                        </div>
                                     {% else %}
                                         <div class="unit-card p-2 bg-light rounded">
                                             <span class="fw-bold">
                                                 <i class="fas fa-cube me-1"></i>
                                                 {{ item.product.base_unit|default:"Piece"|title }}
                                             </span>
-                                            <div class="small text-muted mt-1">
-                                                Default unit (no additional units configured)
-                                            </div>
                                         </div>
                                     {% endif %}
                                 </div>
@@ -283,19 +265,42 @@
                                 <span class="fw-bold text-success">UGX <span class="selling-price-display">{{ item.product.selling_price|floatformat:0 }}</span></span>
                                 <div class="small text-muted">per <span class="base-unit-name">{{ item.product.base_unit|default:"unit" }}</span></div>
                             </td>
-                            <!-- STOCK BY LOCATION - BOLD QUANTITIES -->
-                            <td>
+                            <!-- STOCK BY LOCATION WITH EDITABLE QUANTITIES -->
+                            <td class="stock-location-cell">
                                 <div class="location-quantities">
                                     {% if item.stocks %}
                                         {% for stock in item.stocks %}
-                                            <div class="location-stock-item d-flex justify-content-between align-items-center mb-1" 
+                                            <div class="location-stock-item mb-2 p-2 border rounded" 
                                                  data-location-id="{{ stock.location.id }}"
-                                                 data-base-quantity="{{ stock.quantity }}">
-                                                <span class="location-name small text-muted">{{ stock.location.name }}</span>
-                                                <span class="quantity-badge badge fw-bold fs-6 {% if stock.quantity <= item.product.reorder_level %}bg-warning{% else %}bg-light text-dark{% endif %}"
-                                                      style="font-weight: bold !important; font-size: 1rem !important; min-width: 60px;">
-                                                    {{ stock.quantity }}
-                                                </span>
+                                                 data-stock-id="{{ stock.id }}">
+                                                <div class="d-flex justify-content-between align-items-center">
+                                                    <span class="location-name fw-bold">{{ stock.location.name }}</span>
+                                                    <div class="stock-edit-group">
+                                                        <div class="input-group input-group-sm" style="width: 130px;">
+                                                            <button class="btn btn-outline-secondary decrement-stock" type="button">-</button>
+                                                            <input type="number" 
+                                                                   class="form-control text-center stock-quantity-input" 
+                                                                   value="{{ stock.quantity }}" 
+                                                                   step="1" 
+                                                                   min="0"
+                                                                   data-original-value="{{ stock.quantity }}"
+                                                                   data-stock-id="{{ stock.id }}"
+                                                                   data-location-id="{{ stock.location.id }}"
+                                                                   data-product-id="{{ item.product.id }}">
+                                                            <button class="btn btn-outline-secondary increment-stock" type="button">+</button>
+                                                        </div>
+                                                        <button class="btn btn-sm btn-success save-stock-btn mt-1" 
+                                                                data-stock-id="{{ stock.id }}"
+                                                                style="display: none;">
+                                                            <i class="fas fa-check"></i> Save
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div class="small text-muted mt-1">
+                                                    <i class="fas fa-info-circle"></i> 
+                                                    <span class="stock-unit-display">{{ stock.quantity }}</span> 
+                                                    {{ item.product.base_unit }}s
+                                                </div>
                                             </div>
                                         {% endfor %}
                                         {% if item.total_stock == 0 %}
@@ -305,15 +310,6 @@
                                         <span class="text-muted small">No stock records</span>
                                     {% endif %}
                                 </div>
-                            </td>
-                            <td class="text-center">
-                                {% if item.total_stock == 0 %}
-                                <span class="badge bg-danger">Out of Stock</span>
-                                {% elif item.total_stock <= item.product.reorder_level %}
-                                <span class="badge bg-warning">Low Stock</span>
-                                {% else %}
-                                <span class="badge bg-success">In Stock</span>
-                                {% endif %}
                             </td>
                             <td class="text-center">
                                 <div class="btn-group btn-group-sm">
@@ -408,6 +404,18 @@
     {% endif %}
 </div>
 
+<!-- Toast Notification Container -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1080">
+    <div id="stockToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3000">
+        <div class="toast-header">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong class="me-auto">Stock Update</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body"></div>
+    </div>
+</div>
+
 <style>
 .card.border-left-primary { border-left: 4px solid #4e73df !important; }
 .card.border-left-success { border-left: 4px solid #1cc88a !important; }
@@ -434,57 +442,70 @@
     min-width: 220px;
 }
 
-/* Location quantities styles - BOLD NUMBERS */
+/* Location quantities styles with edit controls */
 .location-quantities {
-    max-height: 120px;
+    max-height: 300px;
     overflow-y: auto;
-    padding-right: 5px;
-    min-width: 140px;
+    padding: 5px;
+    min-width: 250px;
 }
 
 .location-quantities::-webkit-scrollbar {
-    width: 4px;
+    width: 6px;
 }
 
 .location-quantities::-webkit-scrollbar-track {
     background: #f1f1f1;
-    border-radius: 2px;
+    border-radius: 3px;
 }
 
 .location-quantities::-webkit-scrollbar-thumb {
     background: #c1c1c1;
-    border-radius: 2px;
+    border-radius: 3px;
 }
 
 .location-stock-item {
-    padding: 2px 0;
-    border-bottom: 1px solid #f0f0f0;
+    background-color: #f8f9fa;
+    transition: all 0.2s ease;
 }
 
-.location-stock-item:last-child {
-    border-bottom: none;
+.location-stock-item:hover {
+    background-color: #e9ecef;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .location-name {
-    flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 0.85rem;
 }
 
-.quantity-badge {
-    font-size: 0.9rem !important;
-    min-width: 60px;
-    text-align: center;
-    font-weight: bold !important;
-    padding: 4px 8px !important;
-    border-radius: 6px !important;
+.stock-quantity-input {
+    font-weight: bold;
+    font-size: 0.9rem;
+    width: 70px;
 }
 
-/* Make quantity numbers extra bold */
-.quantity-badge {
-    font-weight: 800 !important;
-    font-size: 1rem !important;
+.stock-quantity-input:focus {
+    border-color: #4e73df;
+    box-shadow: 0 0 0 0.2rem rgba(78,115,223,0.25);
+}
+
+.stock-edit-group {
+    min-width: 140px;
+}
+
+.save-stock-btn {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+}
+
+/* Loading animation */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.fa-spin {
+    animation: spin 1s linear infinite;
 }
 </style>
 
@@ -496,71 +517,234 @@ document.addEventListener('DOMContentLoaded', function() {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
 
-    // Function to format numbers correctly
+    // Toast notification
+    const toastEl = document.getElementById('stockToast');
+    const toast = new bootstrap.Toast(toastEl);
+    
+    function showToast(message, isError = false) {
+        const toastBody = toastEl.querySelector('.toast-body');
+        toastBody.textContent = message;
+        toastEl.classList.remove('bg-success', 'bg-danger');
+        toastEl.classList.add(isError ? 'bg-danger' : 'bg-success');
+        toastEl.querySelector('.toast-header').classList.toggle('text-white', !isError);
+        toast.show();
+        setTimeout(() => {
+            toastEl.classList.remove('bg-success', 'bg-danger');
+        }, 3000);
+    }
+
+    // Format numbers
     function formatNumber(value) {
         let num = typeof value === 'string' ? parseFloat(value) : value;
         if (isNaN(num)) return '0';
         return num.toLocaleString('en-US');
     }
 
-    // Function to update stock display when unit changes
-    function updateStockForUnit(productId, unitSelect, totalStock, baseUnit) {
-        const selectedOption = unitSelect.options[unitSelect.selectedIndex];
-        const baseQuantity = parseFloat(selectedOption.dataset.baseQuantity);
-        const unitName = selectedOption.dataset.unitName;
-        let sellingPrice = parseFloat(selectedOption.dataset.sellingPrice);
+    // Update stock via AJAX
+    async function updateStockQuantity(stockId, productId, locationId, newQuantity, inputElement) {
+        const originalValue = inputElement.dataset.originalValue;
         
-        const row = unitSelect.closest('tr');
-        const priceDisplay = row.querySelector('.selling-price-display');
-        if (priceDisplay) {
-            priceDisplay.textContent = formatNumber(sellingPrice);
+        try {
+            const response = await fetch('/inventory/api/update-stock/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    stock_id: stockId,
+                    product_id: productId,
+                    location_id: locationId,
+                    quantity: newQuantity
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                // Update the original value
+                inputElement.dataset.originalValue = newQuantity;
+                
+                // Update the display text
+                const stockItem = inputElement.closest('.location-stock-item');
+                const unitDisplay = stockItem.querySelector('.stock-unit-display');
+                if (unitDisplay) {
+                    unitDisplay.textContent = newQuantity;
+                }
+                
+                // Update status badges on the row
+                updateProductStatus(productId);
+                
+                showToast(`Stock updated successfully to ${newQuantity} units`, false);
+                return true;
+            } else {
+                showToast(data.error || 'Failed to update stock', true);
+                inputElement.value = originalValue;
+                return false;
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showToast('Network error. Please try again.', true);
+            inputElement.value = originalValue;
+            return false;
+        }
+    }
+    
+    // Update product status badges
+    function updateProductStatus(productId) {
+        const row = document.querySelector(`tr[data-product-id="${productId}"]`);
+        if (!row) return;
+        
+        // Recalculate total stock from all locations
+        const stockInputs = row.querySelectorAll('.stock-quantity-input');
+        let totalStock = 0;
+        stockInputs.forEach(input => {
+            totalStock += parseInt(input.value) || 0;
+        });
+        
+        const reorderLevelText = row.querySelector('.small.text-muted strong')?.textContent;
+        const reorderLevel = parseInt(reorderLevelText) || 0;
+        
+        // Remove existing status badge if any
+        const existingStatusBadge = row.querySelector('.status-badge');
+        if (existingStatusBadge) existingStatusBadge.remove();
+        
+        // Add new status badge
+        const actionCell = row.querySelector('td:last-child');
+        let statusBadge = '';
+        let statusClass = '';
+        
+        if (totalStock === 0) {
+            statusClass = 'bg-danger';
+            statusBadge = 'Out of Stock';
+        } else if (totalStock <= reorderLevel) {
+            statusClass = 'bg-warning';
+            statusBadge = 'Low Stock';
+        } else {
+            statusClass = 'bg-success';
+            statusBadge = 'In Stock';
         }
         
-        const conversionSpan = row.querySelector('.unit-conversion-info');
-        if (conversionSpan) {
-            conversionSpan.innerHTML = `1 ${unitName} = ${baseQuantity} ${baseUnit}s`;
-        }
+        const badgeHtml = `<div class="status-badge mt-2"><span class="badge ${statusClass}">${statusBadge}</span></div>`;
+        actionCell.insertAdjacentHTML('beforeend', badgeHtml);
         
-        const locationItems = row.querySelectorAll('.location-stock-item');
-        locationItems.forEach(item => {
-            const baseStock = parseFloat(item.dataset.baseQuantity);
-            const stockInUnit = baseStock / baseQuantity;
-            const badge = item.querySelector('.quantity-badge');
-            if (badge) {
-                badge.innerHTML = `${stockInUnit.toFixed(2)} ${unitName}s`;
-                if (baseStock <= (row.dataset.reorderLevel || 0)) {
-                    badge.classList.remove('bg-light', 'bg-success');
-                    badge.classList.add('bg-warning');
-                } else if (baseStock === 0) {
-                    badge.classList.remove('bg-light', 'bg-warning');
-                    badge.classList.add('bg-danger');
-                } else {
-                    badge.classList.remove('bg-warning', 'bg-danger');
-                    badge.classList.add('bg-light', 'text-dark');
+        // Update statistics
+        calculateStockStats();
+    }
+    
+    // Get CSRF token
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
                 }
             }
+        }
+        return cookieValue;
+    }
+    
+    // Handle quantity input changes
+    function setupStockEditEvents() {
+        // Increment buttons
+        document.querySelectorAll('.increment-stock').forEach(btn => {
+            btn.removeEventListener('click', handleIncrement);
+            btn.addEventListener('click', handleIncrement);
+        });
+        
+        // Decrement buttons
+        document.querySelectorAll('.decrement-stock').forEach(btn => {
+            btn.removeEventListener('click', handleDecrement);
+            btn.addEventListener('click', handleDecrement);
+        });
+        
+        // Quantity inputs
+        document.querySelectorAll('.stock-quantity-input').forEach(input => {
+            input.removeEventListener('input', handleQuantityInput);
+            input.addEventListener('input', handleQuantityInput);
+            
+            input.removeEventListener('keypress', handleQuantityKeypress);
+            input.addEventListener('keypress', handleQuantityKeypress);
+        });
+        
+        // Save buttons
+        document.querySelectorAll('.save-stock-btn').forEach(btn => {
+            btn.removeEventListener('click', handleSaveStock);
+            btn.addEventListener('click', handleSaveStock);
         });
     }
     
-    const unitSelectors = document.querySelectorAll('.unit-selector');
-    unitSelectors.forEach(selector => {
-        const productId = selector.dataset.productId;
-        const totalStock = parseFloat(selector.dataset.totalStock);
-        const row = selector.closest('tr');
-        const baseUnit = row.querySelector('.base-unit-name')?.textContent || 'unit';
+    function handleIncrement(e) {
+        const input = e.currentTarget.closest('.stock-edit-group').querySelector('.stock-quantity-input');
+        const currentVal = parseInt(input.value) || 0;
+        input.value = currentVal + 1;
+        input.dispatchEvent(new Event('input'));
+    }
+    
+    function handleDecrement(e) {
+        const input = e.currentTarget.closest('.stock-edit-group').querySelector('.stock-quantity-input');
+        const currentVal = parseInt(input.value) || 0;
+        if (currentVal > 0) {
+            input.value = currentVal - 1;
+            input.dispatchEvent(new Event('input'));
+        }
+    }
+    
+    function handleQuantityInput(e) {
+        const input = e.currentTarget;
+        const originalValue = parseInt(input.dataset.originalValue);
+        const newValue = parseInt(input.value);
+        const saveBtn = input.closest('.stock-edit-group').querySelector('.save-stock-btn');
         
-        const reorderSpan = row.querySelector('.text-warning');
-        if (reorderSpan && reorderSpan.textContent.includes('Reorder at')) {
-            const reorderMatch = reorderSpan.textContent.match(/(\d+)/);
-            if (reorderMatch) {
-                row.dataset.reorderLevel = reorderMatch[1];
+        if (!isNaN(newValue) && newValue !== originalValue) {
+            saveBtn.style.display = 'inline-block';
+        } else {
+            saveBtn.style.display = 'none';
+        }
+    }
+    
+    function handleQuantityKeypress(e) {
+        if (e.which === 13) {
+            const saveBtn = e.currentTarget.closest('.stock-edit-group').querySelector('.save-stock-btn');
+            if (saveBtn.style.display === 'inline-block') {
+                saveBtn.click();
             }
         }
+    }
+    
+    async function handleSaveStock(e) {
+        const saveBtn = e.currentTarget;
+        const stockItem = saveBtn.closest('.location-stock-item');
+        const input = stockItem.querySelector('.stock-quantity-input');
+        const newQuantity = parseInt(input.value);
+        const stockId = input.dataset.stockId;
+        const productId = input.dataset.productId;
+        const locationId = input.dataset.locationId;
         
-        selector.addEventListener('change', function() {
-            updateStockForUnit(productId, this, totalStock, baseUnit);
-        });
-    });
+        if (isNaN(newQuantity) || newQuantity < 0) {
+            showToast('Please enter a valid quantity', true);
+            return;
+        }
+        
+        // Show loading state
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        saveBtn.disabled = true;
+        
+        const success = await updateStockQuantity(stockId, productId, locationId, newQuantity, input);
+        
+        // Reset button state
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+        
+        if (success) {
+            saveBtn.style.display = 'none';
+        }
+    }
     
     // Calculate stock statistics
     function calculateStockStats() {
@@ -568,15 +752,21 @@ document.addEventListener('DOMContentLoaded', function() {
         const rows = document.querySelectorAll('#productsTable tbody tr');
         
         rows.forEach(row => {
-            const statusBadge = row.querySelector('td:nth-child(7) .badge');
-            if (statusBadge) {
-                if (statusBadge.classList.contains('bg-success')) {
-                    inStock++;
-                } else if (statusBadge.classList.contains('bg-warning')) {
-                    lowStock++;
-                } else if (statusBadge.classList.contains('bg-danger')) {
-                    outOfStock++;
-                }
+            const stockInputs = row.querySelectorAll('.stock-quantity-input');
+            let totalStock = 0;
+            stockInputs.forEach(input => {
+                totalStock += parseInt(input.value) || 0;
+            });
+            
+            const reorderText = row.querySelector('.small.text-muted strong')?.textContent;
+            const reorderLevel = parseInt(reorderText) || 0;
+            
+            if (totalStock === 0) {
+                outOfStock++;
+            } else if (totalStock <= reorderLevel) {
+                lowStock++;
+            } else {
+                inStock++;
             }
         });
         
@@ -589,7 +779,34 @@ document.addEventListener('DOMContentLoaded', function() {
         if (outOfStockEl) outOfStockEl.textContent = outOfStock;
     }
     
+    // Unit selector change handler
+    function setupUnitSelectors() {
+        document.querySelectorAll('.unit-selector').forEach(selector => {
+            selector.addEventListener('change', function() {
+                const selectedOption = this.options[this.selectedIndex];
+                const sellingPrice = selectedOption.dataset.sellingPrice;
+                const row = this.closest('tr');
+                const priceDisplay = row.querySelector('.selling-price-display');
+                
+                if (priceDisplay && sellingPrice) {
+                    priceDisplay.textContent = formatNumber(sellingPrice);
+                }
+            });
+        });
+    }
+    
+    // Initialize all event handlers
+    setupStockEditEvents();
+    setupUnitSelectors();
+    
+    // Calculate initial statistics
     calculateStockStats();
 });
 </script>
+
+<!-- Add this to your urls.py -->
+<!-- 
+path('api/update-stock/', views.update_stock_api, name='update_stock_api'),
+-->
+
 {% endblock %}
