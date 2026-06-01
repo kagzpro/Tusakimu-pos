@@ -283,7 +283,7 @@
                                 <span class="fw-bold text-success">UGX <span class="selling-price-display">{{ item.product.selling_price|floatformat:0 }}</span></span>
                                 <div class="small text-muted">per <span class="base-unit-name">{{ item.product.base_unit|default:"unit" }}</span></div>
                             </td>
-                            <!-- STOCK BY LOCATION - Shows all locations even with 0 stock -->
+                            <!-- STOCK BY LOCATION - BOLD QUANTITIES -->
                             <td>
                                 <div class="location-quantities">
                                     {% if item.stocks %}
@@ -292,22 +292,17 @@
                                                  data-location-id="{{ stock.location.id }}"
                                                  data-base-quantity="{{ stock.quantity }}">
                                                 <span class="location-name small text-muted">{{ stock.location.name }}</span>
-                                                <span class="quantity-badge badge fw-bold fs-6 
-                                                    {% if stock.quantity == 0 %}bg-secondary{% elif stock.quantity <= item.product.reorder_level %}bg-warning{% else %}bg-light text-dark{% endif %}"
+                                                <span class="quantity-badge badge fw-bold fs-6 {% if stock.quantity <= item.product.reorder_level %}bg-warning{% else %}bg-light text-dark{% endif %}"
                                                       style="font-weight: bold !important; font-size: 1rem !important; min-width: 60px;">
                                                     {{ stock.quantity }}
                                                 </span>
                                             </div>
                                         {% endfor %}
+                                        {% if item.total_stock == 0 %}
+                                        <span class="text-muted small">No stock available</span>
+                                        {% endif %}
                                     {% else %}
-                                        {% for location in locations %}
-                                            <div class="location-stock-item d-flex justify-content-between align-items-center mb-1">
-                                                <span class="location-name small text-muted">{{ location.name }}</span>
-                                                <span class="quantity-badge badge bg-secondary fw-bold fs-6" style="min-width: 60px;">
-                                                    0
-                                                </span>
-                                            </div>
-                                        {% endfor %}
+                                        <span class="text-muted small">No stock records</span>
                                     {% endif %}
                                 </div>
                             </td>
@@ -441,7 +436,7 @@
 
 /* Location quantities styles - BOLD NUMBERS */
 .location-quantities {
-    max-height: 150px;
+    max-height: 120px;
     overflow-y: auto;
     padding-right: 5px;
     min-width: 140px;
@@ -462,7 +457,7 @@
 }
 
 .location-stock-item {
-    padding: 4px 0;
+    padding: 2px 0;
     border-bottom: 1px solid #f0f0f0;
 }
 
@@ -529,21 +524,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const locationItems = row.querySelectorAll('.location-stock-item');
         locationItems.forEach(item => {
             const baseStock = parseFloat(item.dataset.baseQuantity);
-            if (!isNaN(baseStock)) {
-                const stockInUnit = baseStock / baseQuantity;
-                const badge = item.querySelector('.quantity-badge');
-                if (badge) {
-                    badge.innerHTML = `${stockInUnit.toFixed(2)} ${unitName}s`;
-                    if (baseStock <= (row.dataset.reorderLevel || 0)) {
-                        badge.classList.remove('bg-light', 'bg-success');
-                        badge.classList.add('bg-warning');
-                    } else if (baseStock === 0) {
-                        badge.classList.remove('bg-light', 'bg-warning');
-                        badge.classList.add('bg-secondary');
-                    } else {
-                        badge.classList.remove('bg-warning', 'bg-danger', 'bg-secondary');
-                        badge.classList.add('bg-light', 'text-dark');
-                    }
+            const stockInUnit = baseStock / baseQuantity;
+            const badge = item.querySelector('.quantity-badge');
+            if (badge) {
+                badge.innerHTML = `${stockInUnit.toFixed(2)} ${unitName}s`;
+                if (baseStock <= (row.dataset.reorderLevel || 0)) {
+                    badge.classList.remove('bg-light', 'bg-success');
+                    badge.classList.add('bg-warning');
+                } else if (baseStock === 0) {
+                    badge.classList.remove('bg-light', 'bg-warning');
+                    badge.classList.add('bg-danger');
+                } else {
+                    badge.classList.remove('bg-warning', 'bg-danger');
+                    badge.classList.add('bg-light', 'text-dark');
                 }
             }
         });
