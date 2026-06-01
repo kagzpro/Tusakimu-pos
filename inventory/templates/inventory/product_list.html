@@ -1,583 +1,544 @@
 {% extends "base.html" %}
 {% load static %}
+{% load humanize %}
+
+{% block title %}Products - Tusakimu Enterprises Inventory Management{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <h2>Edit Product - {{ product.name }}</h2>
-
-    <!-- Display messages -->
-    {% if messages %}
-    <div class="mb-3">
-        {% for message in messages %}
-        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+<div class="container-fluid mt-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="mb-1">Products</h2>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-0">
+                    <li class="breadcrumb-item"><a href="{% url 'inventory:dashboard' %}">Dashboard</a></li>
+                    <li class="breadcrumb-item active">Products</li>
+                </ol>
+            </nav>
         </div>
-        {% endfor %}
+        <div class="btn-group">
+            <a href="{% url 'inventory:import_products' %}" class="btn btn-success">
+                <i class="fas fa-file-import"></i> Import CSV
+            </a>
+            <a href="{% url 'inventory:export_products' %}" class="btn btn-outline-secondary">
+                <i class="fas fa-file-export"></i> Export
+            </a>
+            <a href="{% url 'inventory:product_add' %}" class="btn btn-primary">
+                <i class="fas fa-plus"></i> Add Product
+            </a>
+        </div>
     </div>
-    {% endif %}
 
-    <form method="post" id="productForm">
-        {% csrf_token %}
-        
-        <!-- Product Details -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5>Product Details</h5>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="form-group mb-3">
-                            <label>Product Name *</label>
-                            <input type="text" name="name" value="{{ product.name }}" class="form-control" required>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="form-group mb-3">
-                            <label>Category *</label>
-                            <select name="category" class="form-control" required>
-                                <option value="">Select category</option>
-                                {% for category in categories %}
-                                <option value="{{ category.id }}" {% if product.category.id == category.id %}selected{% endif %}>
-                                    {{ category.name }}
-                                </option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="row">
-                    <div class="col-md-4">
-                        <div class="form-group mb-3">
-                            <label>SKU</label>
-                            <input type="text" name="sku" value="{{ product.sku }}" class="form-control" readonly>
-                            <small class="text-muted">SKU cannot be changed</small>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="form-group mb-3">
-                            <label>Base Unit *</label>
-                            <select name="base_unit" class="form-control" id="baseUnitSelect" required>
-                                <option value="piece" {% if product.base_unit == 'piece' %}selected{% endif %}>Piece (pc)</option>
-                                <option value="kilogram" {% if product.base_unit == 'kilogram' %}selected{% endif %}>Kilogram (kg)</option>
-                                <option value="gram" {% if product.base_unit == 'gram' %}selected{% endif %}>Gram (g)</option>
-                                <option value="liter" {% if product.base_unit == 'liter' %}selected{% endif %}>Liter (L)</option>
-                                <option value="milliliter" {% if product.base_unit == 'milliliter' %}selected{% endif %}>Milliliter (ml)</option>
-                                <option value="meter" {% if product.base_unit == 'meter' %}selected{% endif %}>Meter (m)</option>
-                                <option value="centimeter" {% if product.base_unit == 'centimeter' %}selected{% endif %}>Centimeter (cm)</option>
-                            </select>
-                            <small class="text-muted">Smallest unit of measure for this product</small>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="form-group mb-3">
-                            <label>Reorder Level</label>
-                            <input type="number" name="reorder_level" value="{{ product.reorder_level }}" class="form-control" min="0" step="1">
-                            <small class="text-muted">in {{ product.base_unit|default:"units" }}</small>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="form-group mb-3">
-                            <label>Cost Price (UGX) per Base Unit *</label>
-                            <input type="number" step="0.01" name="cost_price" id="costPrice" value="{{ product.cost_price|stringformat:'.2f' }}" class="form-control" required>
-                            <small class="text-muted">per {{ product.base_unit|default:"unit" }} (this will affect all units)</small>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="form-group mb-3">
-                            <label>Selling Price (UGX) per Base Unit</label>
-                            <input type="number" step="0.01" name="selling_price" id="baseSellingPrice" value="{{ product.selling_price|stringformat:'.2f' }}" class="form-control">
-                            <small class="text-muted">per {{ product.base_unit|default:"unit" }} (base reference price)</small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Units of Measure Section -->
-        <div class="card mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Units of Measure</h5>
-                <button type="button" class="btn btn-sm btn-primary" id="addUnitBtn">
-                    <i class="fas fa-plus"></i> Add Unit
-                </button>
-            </div>
-            <div class="card-body">
-                <p class="text-muted small mb-3">
-                    Define different packaging/selling units for this product. 
-                    <strong>Cost price</strong> is calculated automatically from base unit.<br>
-                    <strong>Selling price</strong> can be manually adjusted or auto-calculated.
-                </p>
-                
-                <div id="unitsContainer">
-                    {% if units %}
-                        {% for unit in units %}
-                        <div class="unit-row mb-3 p-3 border rounded" data-unit-id="{{ unit.id }}">
-                            <div class="row align-items-end">
-                                <div class="col-md-3">
-                                    <label class="form-label">Unit Name *</label>
-                                    <select name="unit_name[]" class="form-control unit-name-select" required>
-                                        <option value="">Select unit type...</option>
-                                        <option value="piece" {% if unit.unit_name == 'piece' %}selected{% endif %}>Piece (pc)</option>
-                                        <option value="packet" {% if unit.unit_name == 'packet' %}selected{% endif %}>Packet (pkt)</option>
-                                        <option value="carton" {% if unit.unit_name == 'carton' %}selected{% endif %}>Carton (ctn)</option>
-                                        <option value="box" {% if unit.unit_name == 'box' %}selected{% endif %}>Box (box)</option>
-                                        <option value="dozen" {% if unit.unit_name == 'dozen' %}selected{% endif %}>Dozen (doz)</option>
-                                        <option value="gross" {% if unit.unit_name == 'gross' %}selected{% endif %}>Gross (gr)</option>
-                                        <option value="roll" {% if unit.unit_name == 'roll' %}selected{% endif %}>Roll (roll)</option>
-                                        <option value="bundle" {% if unit.unit_name == 'bundle' %}selected{% endif %}>Bundle (bdl)</option>
-                                        <option value="set" {% if unit.unit_name == 'set' %}selected{% endif %}>Set (set)</option>
-                                        <option value="pair" {% if unit.unit_name == 'pair' %}selected{% endif %}>Pair (pr)</option>
-                                        <option value="bag" {% if unit.unit_name == 'bag' %}selected{% endif %}>Bag (bag)</option>
-                                        <option value="bottle" {% if unit.unit_name == 'bottle' %}selected{% endif %}>Bottle (btl)</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-2">
-                                    <label class="form-label">Quantity in Base *</label>
-                                    <input type="number" step="0.01" name="unit_quantity[]" value="{{ unit.quantity_in_base|stringformat:'.2f' }}" class="form-control unit-quantity" placeholder="e.g., 50" required>
-                                    <small class="text-muted">= {{ unit.quantity_in_base|stringformat:'.2f' }} {{ product.base_unit }}s</small>
-                                </div>
-                                <div class="col-md-2">
-                                    <label class="form-label">Cost Price (UGX)</label>
-                                    <input type="text" class="form-control unit-cost-price" value="0.00" readonly disabled style="background-color: #e9ecef;">
-                                </div>
-                                <div class="col-md-2">
-                                    <label class="form-label">Selling Price (UGX) *</label>
-                                    <input type="number" step="0.01" name="unit_price[]" value="{{ unit.selling_price|stringformat:'.2f' }}" class="form-control unit-selling-price" required>
-                                </div>
-                                <div class="col-md-2">
-                                    <label class="form-label">Price per {{ product.base_unit }}</label>
-                                    <input type="text" class="form-control price-per-base" value="0.00" readonly disabled style="background-color: #e9ecef;">
-                                </div>
-                                <div class="col-md-1 d-flex align-items-end">
-                                    <div class="form-check me-2">
-                                        <input type="checkbox" name="unit_default[]" value="{{ unit.id }}" class="form-check-input" id="default_{{ unit.id }}" {% if unit.is_default %}checked{% endif %}>
-                                        <label class="form-check-label small" for="default_{{ unit.id }}">Default</label>
-                                    </div>
-                                    <button type="button" class="btn btn-danger btn-sm remove-unit-btn" {% if forloop.first and units|length == 1 %}disabled{% endif %}>
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                </div>
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                Total Products
                             </div>
-                            <div class="row mt-2">
-                                <div class="col-md-12">
-                                    <div class="btn-group btn-group-sm" role="group">
-                                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.9">10% off</button>
-                                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.95">5% off</button>
-                                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.0">Base price</button>
-                                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.05">+5%</button>
-                                        <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.10">+10%</button>
-                                    </div>
-                                    <small class="text-muted ms-2">Quick price adjustments</small>
-                                </div>
-                            </div>
-                            <input type="hidden" name="unit_id[]" value="{{ unit.id }}">
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ product_data|length }}</div>
                         </div>
-                        {% endfor %}
-                    {% else %}
-                        <div class="alert alert-info" id="noUnitsAlert">
-                            <i class="fas fa-info-circle"></i> No units defined. Click "Add Unit" to create packaging units.
-                        </div>
-                    {% endif %}
-                </div>
-                
-                <div class="alert alert-info small mt-3">
-                    <i class="fas fa-lightbulb"></i> <strong>How it works:</strong><br>
-                    - <strong>Cost price</strong> is automatically calculated from the base unit cost<br>
-                    - <strong>Selling price</strong> can be edited manually or auto-calculated using the buttons<br>
-                    - The <strong>base unit</strong> is the smallest unit (e.g., piece, gram, ml)<br>
-                    - Example: If base unit = piece (UGX 1,000), a carton of 50 pieces will have cost = UGX 50,000
-                </div>
-            </div>
-        </div>
-
-        <!-- Stock Quantities Section -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5>Stock Quantities by Location</h5>
-                <p class="text-muted mb-0">Current stock quantities in base units</p>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    {% for location in locations %}
-                    <div class="col-md-4 mb-3">
-                        <div class="form-group">
-                            <label>{{ location.name }}</label>
-                            <input type="number" name="quantity_{{ location.id }}" class="form-control" 
-                                   value="{% for stock in product.stocks.all %}{% if stock.location.id == location.id %}{{ stock.quantity|stringformat:'.2f' }}{% endif %}{% endfor %}" 
-                                   min="0" step="0.01">
-                            <small class="text-muted">
-                                Current: 
-                                {% for stock in product.stocks.all %}
-                                    {% if stock.location.id == location.id %}
-                                        {{ stock.quantity|stringformat:'.2f' }} {{ product.base_unit }}s
-                                    {% endif %}
-                                {% empty %}
-                                    0.00 {{ product.base_unit }}s
-                                {% endfor %}
-                            </small>
+                        <div class="col-auto">
+                            <i class="fas fa-boxes fa-2x text-gray-300"></i>
                         </div>
                     </div>
-                    {% endfor %}
                 </div>
             </div>
         </div>
-
-        <div class="mt-4">
-            <button type="submit" class="btn btn-primary">Update Product</button>
-            <a href="{% url 'inventory:product_list' %}" class="btn btn-secondary">Cancel</a>
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-success shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                In Stock
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="inStockCount">0</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-check-circle fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-    </form>
-</div>
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-warning shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                Low Stock
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="lowStockCount">0</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-danger shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                                Out of Stock
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="outOfStockCount">0</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-times-circle fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    let unitCounter = {{ units|length }};
-    const unitsContainer = document.getElementById('unitsContainer');
-    const addUnitBtn = document.getElementById('addUnitBtn');
-    const noUnitsAlert = document.getElementById('noUnitsAlert');
-    const baseUnit = '{{ product.base_unit }}';
-    const baseCostPrice = document.getElementById('costPrice');
-    const baseSellingPrice = document.getElementById('baseSellingPrice');
-    
-    // Function to round to 2 decimal places
-    function roundToTwo(num) {
-        return Math.round(num * 100) / 100;
-    }
-    
-    // Function to recalculate cost price for a unit
-    function recalculateCostPrice(row) {
-        const quantityInput = row.querySelector('.unit-quantity');
-        const costPriceField = row.querySelector('.unit-cost-price');
-        
-        if (quantityInput && costPriceField && baseCostPrice) {
-            const quantity = parseFloat(quantityInput.value) || 0;
-            const baseCost = parseFloat(baseCostPrice.value) || 0;
-            const calculatedCost = roundToTwo(baseCost * quantity);
-            costPriceField.value = calculatedCost.toFixed(2);
-        }
-    }
-    
-    // Function to recalculate selling price per base unit
-    function recalculatePricePerBase(row) {
-        const quantityInput = row.querySelector('.unit-quantity');
-        const sellingPriceInput = row.querySelector('.unit-selling-price');
-        const pricePerBaseField = row.querySelector('.price-per-base');
-        
-        if (quantityInput && sellingPriceInput && pricePerBaseField) {
-            const quantity = parseFloat(quantityInput.value) || 0;
-            const sellingPrice = parseFloat(sellingPriceInput.value) || 0;
-            if (quantity > 0) {
-                const pricePerBase = roundToTwo(sellingPrice / quantity);
-                pricePerBaseField.value = pricePerBase.toFixed(2);
-            } else {
-                pricePerBaseField.value = '0.00';
-            }
-        }
-    }
-    
-    // Function to auto-calculate selling price based on multiplier
-    function autoCalculateSellingPrice(row, multiplier) {
-        const quantityInput = row.querySelector('.unit-quantity');
-        const sellingPriceInput = row.querySelector('.unit-selling-price');
-        
-        if (quantityInput && sellingPriceInput && baseSellingPrice) {
-            const quantity = parseFloat(quantityInput.value) || 0;
-            const basePrice = parseFloat(baseSellingPrice.value) || 0;
-            const calculatedPrice = roundToTwo(basePrice * quantity * multiplier);
-            sellingPriceInput.value = calculatedPrice.toFixed(2);
-            recalculatePricePerBase(row);
-        }
-    }
-    
-    // Update all units when base cost price changes
-    function updateAllCostPrices() {
-        document.querySelectorAll('.unit-row').forEach(row => {
-            recalculateCostPrice(row);
-        });
-    }
-    
-    // Update all units when base selling price changes
-    function updateAllSellingPrices() {
-        document.querySelectorAll('.unit-row').forEach(row => {
-            const quantityInput = row.querySelector('.unit-quantity');
-            const sellingPriceInput = row.querySelector('.unit-selling-price');
-            if (quantityInput && sellingPriceInput && baseSellingPrice) {
-                // Only auto-update if the price hasn't been manually edited
-                if (!sellingPriceInput.hasAttribute('data-manual-edited')) {
-                    const quantity = parseFloat(quantityInput.value) || 0;
-                    const basePrice = parseFloat(baseSellingPrice.value) || 0;
-                    sellingPriceInput.value = roundToTwo(basePrice * quantity).toFixed(2);
-                    recalculatePricePerBase(row);
-                }
-            }
-        });
-    }
-    
-    // Ensure base prices are never cleared
-    if (baseCostPrice) {
-        baseCostPrice.addEventListener('input', function() {
-            if (!this.value || this.value === '') {
-                this.value = '0.00';
-            }
-            updateAllCostPrices();
-        });
-    }
-    
-    if (baseSellingPrice) {
-        baseSellingPrice.addEventListener('input', function() {
-            if (!this.value || this.value === '') {
-                this.value = '0.00';
-            }
-            updateAllSellingPrices();
-        });
-    }
-    
-    // Remove alert if it exists and we have units
-    if (noUnitsAlert && {{ units|length }} > 0) {
-        noUnitsAlert.style.display = 'none';
-    }
-    
-    // Initialize calculations for existing rows
-    function initializeRowCalculations(row) {
-        recalculateCostPrice(row);
-        recalculatePricePerBase(row);
-    }
-    
-    // Setup event listeners for a row
-    function setupRowEvents(row) {
-        const quantityInput = row.querySelector('.unit-quantity');
-        const sellingPriceInput = row.querySelector('.unit-selling-price');
-        
-        if (quantityInput) {
-            quantityInput.addEventListener('input', function() {
-                // Ensure quantity doesn't become 0.99 due to precision
-                let value = parseFloat(this.value);
-                if (!isNaN(value)) {
-                    this.value = roundToTwo(value).toFixed(2);
-                }
-                recalculateCostPrice(row);
-                recalculatePricePerBase(row);
-                // Reset manual edit flag when quantity changes
-                if (sellingPriceInput) {
-                    sellingPriceInput.removeAttribute('data-manual-edited');
-                }
-            });
-        }
-        
-        if (sellingPriceInput) {
-            sellingPriceInput.addEventListener('input', function() {
-                let value = parseFloat(this.value);
-                if (!isNaN(value)) {
-                    this.value = roundToTwo(value).toFixed(2);
-                }
-                this.setAttribute('data-manual-edited', 'true');
-                recalculatePricePerBase(row);
-            });
-        }
-        
-        // Auto-price buttons
-        const autoPriceBtns = row.querySelectorAll('.auto-price-btn');
-        autoPriceBtns.forEach(btn => {
-            btn.addEventListener('click', function() {
-                const multiplier = parseFloat(this.dataset.multiplier);
-                autoCalculateSellingPrice(row, multiplier);
-                if (sellingPriceInput) {
-                    sellingPriceInput.setAttribute('data-manual-edited', 'true');
-                }
-            });
-        });
-        
-        // Initial calculations
-        initializeRowCalculations(row);
-        
-        // Remove button functionality
-        const removeBtn = row.querySelector('.remove-unit-btn');
-        if (removeBtn) {
-            removeBtn.addEventListener('click', function() {
-                row.remove();
-                if (unitsContainer.querySelectorAll('.unit-row').length === 0 && noUnitsAlert) {
-                    noUnitsAlert.style.display = 'block';
-                }
-            });
-        }
-    }
-    
-    // Add new unit row
-    if (addUnitBtn) {
-        addUnitBtn.addEventListener('click', function() {
-            unitCounter++;
-            
-            if (noUnitsAlert) {
-                noUnitsAlert.style.display = 'none';
-            }
-            
-            const newRow = document.createElement('div');
-            newRow.className = 'unit-row mb-3 p-3 border rounded';
-            newRow.innerHTML = `
-                <div class="row align-items-end">
+    <!-- Search and Filters Card -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-filter"></i> Filters & Search
+            </h5>
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" 
+                    data-bs-target="#filterCollapse" aria-expanded="true">
+                <i class="fas fa-chevron-down"></i>
+            </button>
+        </div>
+        <div class="collapse show" id="filterCollapse">
+            <div class="card-body">
+                <form method="get" class="row g-3" id="filterForm">
+                    <div class="col-md-4">
+                        <label class="form-label">Search</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" name="q" value="{{ search_query }}"
+                                   placeholder="Name, SKU, category...">
+                            <button class="btn btn-outline-primary" type="submit">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
                     <div class="col-md-3">
-                        <label class="form-label">Unit Name *</label>
-                        <select name="unit_name[]" class="form-control unit-name-select" required>
-                            <option value="">Select unit type...</option>
-                            <option value="piece">Piece (pc)</option>
-                            <option value="packet">Packet (pkt)</option>
-                            <option value="carton">Carton (ctn)</option>
-                            <option value="box">Box (box)</option>
-                            <option value="dozen">Dozen (doz)</option>
-                            <option value="gross">Gross (gr)</option>
-                            <option value="roll">Roll (roll)</option>
-                            <option value="bundle">Bundle (bdl)</option>
-                            <option value="set">Set (set)</option>
-                            <option value="pair">Pair (pr)</option>
-                            <option value="bag">Bag (bag)</option>
-                            <option value="bottle">Bottle (btl)</option>
+                        <label class="form-label">Category</label>
+                        <select class="form-select" name="category" id="categoryFilter">
+                            <option value="">All Categories</option>
+                            {% for category in categories %}
+                            <option value="{{ category.id }}" {% if category_filter == category.id|stringformat:"i" %}selected{% endif %}>
+                                {{ category.name }}
+                            </option>
+                            {% endfor %}
                         </select>
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Quantity in Base *</label>
-                        <input type="number" step="0.01" name="unit_quantity[]" class="form-control unit-quantity" placeholder="e.g., 50" required>
-                        <small class="text-muted">= X ${baseUnit}s</small>
+                    
+                    <div class="col-md-3">
+                        <label class="form-label">Sort By</label>
+                        <select class="form-select" name="sort" id="sortBy">
+                            <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name (A-Z)</option>
+                            <option value="-name" {% if sort_by == '-name' %}selected{% endif %}>Name (Z-A)</option>
+                            <option value="sku" {% if sort_by == 'sku' %}selected{% endif %}>SKU</option>
+                            <option value="category__name" {% if sort_by == 'category__name' %}selected{% endif %}>Category</option>
+                            <option value="selling_price" {% if sort_by == 'selling_price' %}selected{% endif %}>Price (Low to High)</option>
+                            <option value="-selling_price" {% if sort_by == '-selling_price' %}selected{% endif %}>Price (High to Low)</option>
+                        </select>
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Cost Price (UGX)</label>
-                        <input type="text" class="form-control unit-cost-price" readonly disabled style="background-color: #e9ecef;">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Selling Price (UGX) *</label>
-                        <input type="number" step="0.01" name="unit_price[]" class="form-control unit-selling-price" required>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Price per ${baseUnit}</label>
-                        <input type="text" class="form-control price-per-base" readonly disabled style="background-color: #e9ecef;">
-                    </div>
-                    <div class="col-md-1 d-flex align-items-end">
-                        <div class="form-check me-2">
-                            <input type="checkbox" name="unit_default[]" value="new_${unitCounter}" class="form-check-input" id="default_new_${unitCounter}">
-                            <label class="form-check-label small" for="default_new_${unitCounter}">Default</label>
+                    
+                    <div class="col-md-2 d-flex align-items-end">
+                        <div class="btn-group w-100">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-filter"></i> Filter
+                            </button>
+                            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary">
+                                <i class="fas fa-redo"></i>
+                            </a>
                         </div>
-                        <button type="button" class="btn btn-danger btn-sm remove-unit-btn">
-                            <i class="fas fa-trash"></i>
-                        </button>
                     </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Products Table -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-list"></i> Products List
+                {% if search_query or category_filter %}
+                <small class="text-muted">(Filtered Results)</small>
+                {% endif %}
+            </h5>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <i class="fas fa-cog"></i> Actions
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="{% url 'inventory:stock_report' %}">
+                        <i class="fas fa-chart-bar"></i> Stock Report
+                    </a></li>
+                    <li><a class="dropdown-item" href="{% url 'inventory:export_products' %}">
+                        <i class="fas fa-download"></i> Export All
+                    </a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            {% if product_data %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0" id="productsTable">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Product</th>
+                            <th>SKU</th>
+                            <th>Category</th>
+                            <th>Unit of Measure</th>
+                            <th class="text-end">Selling Price (UGX)</th>
+                            <th>Stock by Location</th>
+                            <th class="text-center">Status</th>
+                            <th class="text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in product_data %}
+                        <tr class="product-row" data-product-id="{{ item.product.id }}">
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="flex-shrink-0">
+                                        <div class="bg-light rounded-2 d-flex align-items-center justify-content-center" 
+                                             style="width: 40px; height: 40px;">
+                                            <i class="fas fa-box text-muted"></i>
+                                        </div>
+                                    </div>
+                                    <div class="flex-grow-1 ms-3">
+                                        <a href="{% url 'inventory:product_detail' item.product.id %}" 
+                                           class="text-decoration-none fw-bold text-dark">
+                                            {{ item.product.name }}
+                                        </a>
+                                        <div class="small text-muted">
+                                            Base Unit: <strong>{{ item.product.base_unit|default:"piece" }}</strong>
+                                        </div>
+                                        {% if item.product.reorder_level and item.total_stock <= item.product.reorder_level %}
+                                        <div class="small text-warning">
+                                            <i class="fas fa-exclamation-circle"></i> Reorder at {{ item.product.reorder_level|intcomma }}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <code class="small">{{ item.product.sku|default:"-" }}</code>
+                            </td>
+                            <td>
+                                {% if item.product.category %}
+                                <span class="badge bg-light text-dark">{{ item.product.category.name }}</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="units-column">
+                                <div class="units-container">
+                                    {% if item.product.units.all %}
+                                        <select class="form-select form-select-sm unit-selector" 
+                                                data-product-id="{{ item.product.id }}"
+                                                data-total-stock="{{ item.total_stock }}">
+                                            {% for unit in item.product.units.all %}
+                                            <option value="{{ unit.id }}" 
+                                                    data-unit-name="{{ unit.unit_name }}"
+                                                    data-base-quantity="{{ unit.quantity_in_base }}"
+                                                    data-selling-price="{{ unit.selling_price }}">
+                                                {{ unit.unit_name|title }} 
+                                                (1 = {{ unit.quantity_in_base|floatformat:2 }} {{ item.product.base_unit }}s)
+                                                - UGX {{ unit.selling_price|floatformat:0|intcomma }}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                        <div class="small text-muted mt-1">
+                                            <i class="fas fa-info-circle"></i> 
+                                            <span class="unit-conversion-info">
+                                                {% with default_unit=item.product.units.all|first %}
+                                                1 {{ default_unit.unit_name }} = {{ default_unit.quantity_in_base|floatformat:2 }} {{ item.product.base_unit }}s
+                                                {% endwith %}
+                                            </span>
+                                        </div>
+                                    {% else %}
+                                        <div class="unit-card p-2 bg-light rounded">
+                                            <span class="fw-bold">
+                                                <i class="fas fa-cube me-1"></i>
+                                                {{ item.product.base_unit|default:"Piece"|title }}
+                                            </span>
+                                            <div class="small text-muted mt-1">
+                                                Default unit (no additional units configured)
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td class="text-end">
+                                <span class="fw-bold text-success">UGX <span class="selling-price-display">{{ item.product.selling_price|floatformat:0|intcomma }}</span></span>
+                                <div class="small text-muted">per <span class="base-unit-name">{{ item.product.base_unit|default:"unit" }}</span></div>
+                            </td>
+                            <!-- STOCK BY LOCATION - Shows all locations even with 0 stock -->
+                            <td>
+                                <div class="location-quantities">
+                                    {% if item.stocks %}
+                                        {% for stock in item.stocks %}
+                                            <div class="location-stock-item d-flex justify-content-between align-items-center mb-1" 
+                                                 data-location-id="{{ stock.location.id }}"
+                                                 data-base-quantity="{{ stock.quantity }}">
+                                                <span class="location-name small text-muted">{{ stock.location.name }}</span>
+                                                <span class="quantity-badge badge fw-bold fs-6 
+                                                    {% if stock.quantity|floatformat:0 == "0" %}bg-secondary
+                                                    {% elif stock.quantity <= item.product.reorder_level %}bg-warning
+                                                    {% else %}bg-light text-dark{% endif %}"
+                                                      style="font-weight: bold !important; font-size: 1rem !important; min-width: 80px;">
+                                                    {{ stock.quantity|floatformat:0|intcomma }}
+                                                </span>
+                                            </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        {% for location in locations %}
+                                            <div class="location-stock-item d-flex justify-content-between align-items-center mb-1">
+                                                <span class="location-name small text-muted">{{ location.name }}</span>
+                                                <span class="quantity-badge badge bg-secondary fw-bold fs-6" style="min-width: 80px;">
+                                                    0
+                                                </span>
+                                            </div>
+                                        {% endfor %}
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td class="text-center">
+                                {% if item.total_stock|floatformat:0 == "0" %}
+                                <span class="badge bg-danger">Out of Stock</span>
+                                {% elif item.total_stock <= item.product.reorder_level %}
+                                <span class="badge bg-warning">Low Stock</span>
+                                {% else %}
+                                <span class="badge bg-success">In Stock</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{% url 'inventory:product_edit' item.product.id %}" 
+                                       class="btn btn-outline-primary" title="Edit" data-bs-toggle="tooltip">
+                                        <i class="fas fa-edit"></i>
+                                    </a>
+                                    <a href="{% url 'inventory:product_detail' item.product.id %}" 
+                                       class="btn btn-outline-info" title="View Details" data-bs-toggle="tooltip">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a href="{% url 'inventory:product_delete' item.product.id %}" 
+                                       class="btn btn-outline-danger" 
+                                       title="Delete"
+                                       onclick="return confirm('Are you sure you want to delete {{ item.product.name|escapejs }} ?')">
+                                        <i class="fas fa-trash"></i>
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-5">
+                <div class="mb-4">
+                    <i class="fas fa-box-open fa-4x text-muted"></i>
                 </div>
-                <div class="row mt-2">
-                    <div class="col-md-12">
-                        <div class="btn-group btn-group-sm" role="group">
-                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.9">10% off</button>
-                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="0.95">5% off</button>
-                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.0">Base price</button>
-                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.05">+5%</button>
-                            <button type="button" class="btn btn-outline-secondary auto-price-btn" data-multiplier="1.10">+10%</button>
-                        </div>
-                        <small class="text-muted ms-2">Quick price adjustments</small>
-                    </div>
-                </div>
-                <input type="hidden" name="unit_id[]" value="">
-            `;
-            
-            unitsContainer.appendChild(newRow);
-            setupRowEvents(newRow);
-            
-            // Auto-calculate based on current base prices
-            const quantityInput = newRow.querySelector('.unit-quantity');
-            const sellingPriceInput = newRow.querySelector('.unit-selling-price');
-            
-            if (quantityInput && sellingPriceInput && baseSellingPrice) {
-                quantityInput.value = '1.00';
-                const basePrice = parseFloat(baseSellingPrice.value) || 0;
-                sellingPriceInput.value = basePrice.toFixed(2);
-                recalculateCostPrice(newRow);
-                recalculatePricePerBase(newRow);
-            }
-        });
-    }
-    
-    // Setup existing rows
-    document.querySelectorAll('.unit-row').forEach(row => {
-        setupRowEvents(row);
-    });
-    
-    // Form submission - ensure all values are properly formatted
-    const form = document.querySelector('form');
-    if (form) {
-        form.addEventListener('submit', function(e) {
-            // Ensure base prices are not empty
-            if (baseCostPrice && (!baseCostPrice.value || baseCostPrice.value === '')) {
-                baseCostPrice.value = '0.00';
-            }
-            if (baseSellingPrice && (!baseSellingPrice.value || baseSellingPrice.value === '')) {
-                baseSellingPrice.value = '0.00';
-            }
-            
-            // Ensure all unit quantities and prices are properly formatted
-            document.querySelectorAll('.unit-row').forEach(row => {
-                const quantityInput = row.querySelector('.unit-quantity');
-                const sellingPriceInput = row.querySelector('.unit-selling-price');
-                
-                if (quantityInput && (!quantityInput.value || quantityInput.value === '')) {
-                    quantityInput.value = '1.00';
-                }
-                
-                if (sellingPriceInput && (!sellingPriceInput.value || sellingPriceInput.value === '')) {
-                    const quantity = parseFloat(quantityInput.value) || 1;
-                    const basePrice = parseFloat(baseSellingPrice.value) || 0;
-                    sellingPriceInput.value = roundToTwo(basePrice * quantity).toFixed(2);
-                }
-            });
-            
-            // Ensure at least one default unit is selected if units exist
-            const defaultCheckboxes = document.querySelectorAll('input[name="unit_default[]"]:checked');
-            if (defaultCheckboxes.length === 0 && document.querySelectorAll('.unit-row').length > 0) {
-                const firstCheckbox = document.querySelector('input[name="unit_default[]"]');
-                if (firstCheckbox) {
-                    firstCheckbox.checked = true;
-                }
-            }
-        });
-    }
-});
-</script>
+                <h5 class="text-muted">No products found</h5>
+                <p class="text-muted mb-4">
+                    {% if search_query or category_filter %}
+                    Try adjusting your search criteria
+                    {% else %}
+                    Start by adding your first product
+                    {% endif %}
+                </p>
+                {% if not search_query and not category_filter %}
+                <a href="{% url 'inventory:product_add' %}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Add First Product
+                </a>
+                {% else %}
+                <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary">
+                    <i class="fas fa-redo"></i> Clear Filters
+                </a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    {% if page_obj and page_obj.paginator.num_pages > 1 %}
+    <div class="d-flex justify-content-between align-items-center mt-4">
+        <div class="text-muted small">
+            Showing {{ page_obj.start_index }} to {{ page_obj.end_index }} of {{ page_obj.paginator.count }} entries
+        </div>
+        <nav aria-label="Product pagination">
+            <ul class="pagination mb-0">
+                {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <a class="page-link" href="?page=1{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">First</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">Previous</a>
+                </li>
+                {% endif %}
+
+                {% for num in page_obj.paginator.page_range %}
+                    {% if page_obj.number == num %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ num }}</span>
+                    </li>
+                    {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">{{ num }}</a>
+                    </li>
+                    {% endif %}
+                {% endfor %}
+
+                {% if page_obj.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">Next</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">Last</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
 
 <style>
-.unit-row {
-    background-color: #f8f9fa;
+.card.border-left-primary { border-left: 4px solid #4e73df !important; }
+.card.border-left-success { border-left: 4px solid #1cc88a !important; }
+.card.border-left-warning { border-left: 4px solid #f6c23e !important; }
+.card.border-left-danger { border-left: 4px solid #e74a3b !important; }
+
+.product-row {
     transition: all 0.2s ease;
 }
 
-.unit-row:hover {
-    background-color: #e9ecef;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+.product-row:hover {
+    background-color: #f8f9fa !important;
 }
 
-.unit-cost-price, .price-per-base {
-    background-color: #e9ecef !important;
-}
-
-.btn-sm .fas {
-    font-size: 0.875rem;
-}
-
-.form-label {
-    font-weight: 500;
-    font-size: 0.875rem;
-    margin-bottom: 0.25rem;
-}
-
-.auto-price-btn {
-    font-size: 0.75rem;
+/* Unit selector styles */
+.unit-selector {
+    font-size: 0.8rem;
     padding: 0.25rem 0.5rem;
+    width: 100%;
+    border-radius: 4px;
 }
 
-.auto-price-btn:hover {
-    background-color: #0d6efd;
-    color: white;
-    border-color: #0d6efd;
+.units-column {
+    min-width: 220px;
+}
+
+/* Location quantities styles */
+.location-quantities {
+    max-height: 150px;
+    overflow-y: auto;
+    padding-right: 5px;
+    min-width: 160px;
+}
+
+.location-quantities::-webkit-scrollbar {
+    width: 4px;
+}
+
+.location-quantities::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 2px;
+}
+
+.location-quantities::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 2px;
+}
+
+.location-stock-item {
+    padding: 4px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.location-stock-item:last-child {
+    border-bottom: none;
+}
+
+.location-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.quantity-badge {
+    font-size: 0.9rem !important;
+    min-width: 80px;
+    text-align: center;
+    font-weight: bold !important;
+    padding: 4px 8px !important;
+    border-radius: 6px !important;
+}
+
+/* Make quantity numbers extra bold */
+.quantity-badge {
+    font-weight: 800 !important;
+    font-size: 1rem !important;
 }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize tooltips
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function(tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+
+    // Function to format numbers with commas
+    function formatNumberWithCommas(value) {
+        let num = typeof value === 'string' ? parseFloat(value) : value;
+        if (isNaN(num)) return '0';
+        return num.toLocaleString('en-US');
+    }
+
+    // Calculate stock statistics
+    function calculateStockStats() {
+        let inStock = 0, lowStock = 0, outOfStock = 0;
+        const rows = document.querySelectorAll('#productsTable tbody tr');
+        
+        rows.forEach(row => {
+            const statusBadge = row.querySelector('td:nth-child(7) .badge');
+            if (statusBadge) {
+                if (statusBadge.classList.contains('bg-success')) {
+                    inStock++;
+                } else if (statusBadge.classList.contains('bg-warning')) {
+                    lowStock++;
+                } else if (statusBadge.classList.contains('bg-danger')) {
+                    outOfStock++;
+                }
+            }
+        });
+        
+        const inStockEl = document.getElementById('inStockCount');
+        const lowStockEl = document.getElementById('lowStockCount');
+        const outOfStockEl = document.getElementById('outOfStockCount');
+        
+        if (inStockEl) inStockEl.textContent = formatNumberWithCommas(inStock);
+        if (lowStockEl) lowStockEl.textContent = formatNumberWithCommas(lowStock);
+        if (outOfStockEl) outOfStockEl.textContent = formatNumberWithCommas(outOfStock);
+    }
+    
+    calculateStockStats();
+});
+</script>
 {% endblock %}
