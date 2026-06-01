@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
+{% load humanize %}
 
 {% block title %}Products - Tusakimu Enterprises Inventory Management{% endblock %}
 
@@ -225,7 +226,7 @@
                                         </div>
                                         {% if item.product.reorder_level and item.total_stock <= item.product.reorder_level %}
                                         <div class="small text-warning">
-                                            <i class="fas fa-exclamation-circle"></i> Reorder at {{ item.product.reorder_level }}
+                                            <i class="fas fa-exclamation-circle"></i> Reorder at {{ item.product.reorder_level|intcomma }}
                                         </div>
                                         {% endif %}
                                     </div>
@@ -253,8 +254,8 @@
                                                     data-base-quantity="{{ unit.quantity_in_base }}"
                                                     data-selling-price="{{ unit.selling_price }}">
                                                 {{ unit.unit_name|title }} 
-                                                (1 = {{ unit.quantity_in_base }} {{ item.product.base_unit }}s)
-                                                - UGX {{ unit.selling_price|floatformat:0 }}
+                                                (1 = {{ unit.quantity_in_base|floatformat:2 }} {{ item.product.base_unit }}s)
+                                                - UGX {{ unit.selling_price|floatformat:0|intcomma }}
                                             </option>
                                             {% endfor %}
                                         </select>
@@ -262,7 +263,7 @@
                                             <i class="fas fa-info-circle"></i> 
                                             <span class="unit-conversion-info">
                                                 {% with default_unit=item.product.units.all|first %}
-                                                1 {{ default_unit.unit_name }} = {{ default_unit.quantity_in_base }} {{ item.product.base_unit }}s
+                                                1 {{ default_unit.unit_name }} = {{ default_unit.quantity_in_base|floatformat:2 }} {{ item.product.base_unit }}s
                                                 {% endwith %}
                                             </span>
                                         </div>
@@ -280,10 +281,10 @@
                                 </div>
                             </td>
                             <td class="text-end">
-                                <span class="fw-bold text-success">UGX <span class="selling-price-display">{{ item.product.selling_price|floatformat:0 }}</span></span>
+                                <span class="fw-bold text-success">UGX <span class="selling-price-display">{{ item.product.selling_price|floatformat:0|intcomma }}</span></span>
                                 <div class="small text-muted">per <span class="base-unit-name">{{ item.product.base_unit|default:"unit" }}</span></div>
                             </td>
-                            <!-- STOCK BY LOCATION - BOLD QUANTITIES -->
+                            <!-- STOCK BY LOCATION - Shows all locations even with 0 stock -->
                             <td>
                                 <div class="location-quantities">
                                     {% if item.stocks %}
@@ -292,22 +293,29 @@
                                                  data-location-id="{{ stock.location.id }}"
                                                  data-base-quantity="{{ stock.quantity }}">
                                                 <span class="location-name small text-muted">{{ stock.location.name }}</span>
-                                                <span class="quantity-badge badge fw-bold fs-6 {% if stock.quantity <= item.product.reorder_level %}bg-warning{% else %}bg-light text-dark{% endif %}"
-                                                      style="font-weight: bold !important; font-size: 1rem !important; min-width: 60px;">
-                                                    {{ stock.quantity }}
+                                                <span class="quantity-badge badge fw-bold fs-6 
+                                                    {% if stock.quantity|floatformat:0 == "0" %}bg-secondary
+                                                    {% elif stock.quantity <= item.product.reorder_level %}bg-warning
+                                                    {% else %}bg-light text-dark{% endif %}"
+                                                      style="font-weight: bold !important; font-size: 1rem !important; min-width: 80px;">
+                                                    {{ stock.quantity|floatformat:0|intcomma }}
                                                 </span>
                                             </div>
                                         {% endfor %}
-                                        {% if item.total_stock == 0 %}
-                                        <span class="text-muted small">No stock available</span>
-                                        {% endif %}
                                     {% else %}
-                                        <span class="text-muted small">No stock records</span>
+                                        {% for location in locations %}
+                                            <div class="location-stock-item d-flex justify-content-between align-items-center mb-1">
+                                                <span class="location-name small text-muted">{{ location.name }}</span>
+                                                <span class="quantity-badge badge bg-secondary fw-bold fs-6" style="min-width: 80px;">
+                                                    0
+                                                </span>
+                                            </div>
+                                        {% endfor %}
                                     {% endif %}
                                 </div>
                             </td>
                             <td class="text-center">
-                                {% if item.total_stock == 0 %}
+                                {% if item.total_stock|floatformat:0 == "0" %}
                                 <span class="badge bg-danger">Out of Stock</span>
                                 {% elif item.total_stock <= item.product.reorder_level %}
                                 <span class="badge bg-warning">Low Stock</span>
@@ -434,12 +442,12 @@
     min-width: 220px;
 }
 
-/* Location quantities styles - BOLD NUMBERS */
+/* Location quantities styles */
 .location-quantities {
-    max-height: 120px;
+    max-height: 150px;
     overflow-y: auto;
     padding-right: 5px;
-    min-width: 140px;
+    min-width: 160px;
 }
 
 .location-quantities::-webkit-scrollbar {
@@ -457,7 +465,7 @@
 }
 
 .location-stock-item {
-    padding: 2px 0;
+    padding: 4px 0;
     border-bottom: 1px solid #f0f0f0;
 }
 
@@ -474,7 +482,7 @@
 
 .quantity-badge {
     font-size: 0.9rem !important;
-    min-width: 60px;
+    min-width: 80px;
     text-align: center;
     font-weight: bold !important;
     padding: 4px 8px !important;
@@ -496,72 +504,13 @@ document.addEventListener('DOMContentLoaded', function() {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
 
-    // Function to format numbers correctly
-    function formatNumber(value) {
+    // Function to format numbers with commas
+    function formatNumberWithCommas(value) {
         let num = typeof value === 'string' ? parseFloat(value) : value;
         if (isNaN(num)) return '0';
         return num.toLocaleString('en-US');
     }
 
-    // Function to update stock display when unit changes
-    function updateStockForUnit(productId, unitSelect, totalStock, baseUnit) {
-        const selectedOption = unitSelect.options[unitSelect.selectedIndex];
-        const baseQuantity = parseFloat(selectedOption.dataset.baseQuantity);
-        const unitName = selectedOption.dataset.unitName;
-        let sellingPrice = parseFloat(selectedOption.dataset.sellingPrice);
-        
-        const row = unitSelect.closest('tr');
-        const priceDisplay = row.querySelector('.selling-price-display');
-        if (priceDisplay) {
-            priceDisplay.textContent = formatNumber(sellingPrice);
-        }
-        
-        const conversionSpan = row.querySelector('.unit-conversion-info');
-        if (conversionSpan) {
-            conversionSpan.innerHTML = `1 ${unitName} = ${baseQuantity} ${baseUnit}s`;
-        }
-        
-        const locationItems = row.querySelectorAll('.location-stock-item');
-        locationItems.forEach(item => {
-            const baseStock = parseFloat(item.dataset.baseQuantity);
-            const stockInUnit = baseStock / baseQuantity;
-            const badge = item.querySelector('.quantity-badge');
-            if (badge) {
-                badge.innerHTML = `${stockInUnit.toFixed(2)} ${unitName}s`;
-                if (baseStock <= (row.dataset.reorderLevel || 0)) {
-                    badge.classList.remove('bg-light', 'bg-success');
-                    badge.classList.add('bg-warning');
-                } else if (baseStock === 0) {
-                    badge.classList.remove('bg-light', 'bg-warning');
-                    badge.classList.add('bg-danger');
-                } else {
-                    badge.classList.remove('bg-warning', 'bg-danger');
-                    badge.classList.add('bg-light', 'text-dark');
-                }
-            }
-        });
-    }
-    
-    const unitSelectors = document.querySelectorAll('.unit-selector');
-    unitSelectors.forEach(selector => {
-        const productId = selector.dataset.productId;
-        const totalStock = parseFloat(selector.dataset.totalStock);
-        const row = selector.closest('tr');
-        const baseUnit = row.querySelector('.base-unit-name')?.textContent || 'unit';
-        
-        const reorderSpan = row.querySelector('.text-warning');
-        if (reorderSpan && reorderSpan.textContent.includes('Reorder at')) {
-            const reorderMatch = reorderSpan.textContent.match(/(\d+)/);
-            if (reorderMatch) {
-                row.dataset.reorderLevel = reorderMatch[1];
-            }
-        }
-        
-        selector.addEventListener('change', function() {
-            updateStockForUnit(productId, this, totalStock, baseUnit);
-        });
-    });
-    
     // Calculate stock statistics
     function calculateStockStats() {
         let inStock = 0, lowStock = 0, outOfStock = 0;
@@ -584,9 +533,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const lowStockEl = document.getElementById('lowStockCount');
         const outOfStockEl = document.getElementById('outOfStockCount');
         
-        if (inStockEl) inStockEl.textContent = inStock;
-        if (lowStockEl) lowStockEl.textContent = lowStock;
-        if (outOfStockEl) outOfStockEl.textContent = outOfStock;
+        if (inStockEl) inStockEl.textContent = formatNumberWithCommas(inStock);
+        if (lowStockEl) lowStockEl.textContent = formatNumberWithCommas(lowStock);
+        if (outOfStockEl) outOfStockEl.textContent = formatNumberWithCommas(outOfStock);
     }
     
     calculateStockStats();
