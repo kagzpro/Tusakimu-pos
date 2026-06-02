@@ -151,7 +151,7 @@ path('products/<int:product_id>/movement-export/', views.product_movement_export
     # ADD THESE TWO LINES - FIX FOR SALE FORM
     path('api/stock/<int:product_id>/<int:location_id>/', views.api_product_stock, name='api_product_stock'),
     path('api/product-units/<int:product_id>/', views.api_product_units, name='api_product_units'),
-    
+    path('import-fixed/', views.import_products_fixed, name='import_products_fixed'),
     # ... rest of your URLs ...
 
 ] 
