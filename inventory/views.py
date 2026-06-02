@@ -2092,82 +2092,108 @@ def import_products_csv(request):
             messages.error(request, "Please upload a valid CSV file")
             return redirect('inventory:import_products')
         
-        # Read CSV file
+        # Get import options
+        preserve_stock = request.POST.get('preserve_stock') == 'true'
+        
         try:
-            decoded_file = csv_file.read().decode('utf-8')
+            # Read CSV file
+            decoded_file = csv_file.read().decode('utf-8-sig')  # Use utf-8-sig to handle BOM
             io_string = io.StringIO(decoded_file)
             reader = csv.reader(io_string)
-            header = next(reader)  # Skip header row
+            header = next(reader)
             
-            # Find column indices
-            col_indices = {
-                'name': header.index('Name') if 'Name' in header else None,
-                'sku': header.index('SKU') if 'SKU' in header else None,
-                'category': header.index('Category') if 'Category' in header else None,
-                'base_unit': header.index('Base Unit') if 'Base Unit' in header else None,
-                'cost_price': header.index('Cost Price') if 'Cost Price' in header else None,
-                'selling_price': header.index('Selling Price') if 'Selling Price' in header else None,
-                'reorder_level': header.index('Reorder Level') if 'Reorder Level' in header else None,
-            }
+            # Clean header (remove BOM and whitespace)
+            header = [col.strip().replace('\ufeff', '') for col in header]
             
-            # Find stock location columns
-            stock_columns = {}
-            location_names = [loc.name for loc in user_locations]
-            for idx, col in enumerate(header):
-                if col.startswith('Stock_'):
-                    location_name = col.replace('Stock_', '')
-                    if location_name in location_names:
-                        location = user_locations.filter(name=location_name).first()
-                        if location:
-                            stock_columns[idx] = location
+            # Find required column indices
+            try:
+                name_idx = header.index('Name')
+                sku_idx = header.index('SKU')
+            except ValueError as e:
+                messages.error(request, f"Required column 'Name' or 'SKU' not found in CSV. Available columns: {', '.join(header[:10])}")
+                return redirect('inventory:import_products')
             
-            # Find unit columns (Unit1_Name, Unit1_QtyInBase, Unit1_Price, etc.)
+            # Find optional column indices
+            category_idx = header.index('Category') if 'Category' in header else None
+            base_unit_idx = header.index('Base Unit') if 'Base Unit' in header else None
+            cost_price_idx = header.index('Cost Price') if 'Cost Price' in header else None
+            selling_price_idx = header.index('Selling Price') if 'Selling Price' in header else None
+            reorder_level_idx = header.index('Reorder Level') if 'Reorder Level' in header else None
+            
+            # Find unit columns
             unit_columns = []
-            for i in range(1, 6):  # Up to 5 units
+            for i in range(1, 6):
                 name_col = f'Unit{i}_Name'
                 qty_col = f'Unit{i}_QtyInBase'
                 price_col = f'Unit{i}_Price'
-                if name_col in header and qty_col in header and price_col in header:
+                
+                if name_col in header and qty_col in header:
                     unit_columns.append({
                         'name_idx': header.index(name_col),
                         'qty_idx': header.index(qty_col),
-                        'price_idx': header.index(price_col)
+                        'price_idx': header.index(price_col) if price_col in header else None
                     })
             
-            # Process rows
+            # Find stock location columns
+            stock_columns = []
+            for idx, col in enumerate(header):
+                if col.startswith('Stock_'):
+                    location_name = col.replace('Stock_', '')
+                    location = user_locations.filter(name=location_name).first()
+                    if location:
+                        stock_columns.append({
+                            'idx': idx,
+                            'location': location
+                        })
+            
+            # Initialize counters
             imported_count = 0
             updated_count = 0
-            stock_updates_count = 0
             units_imported = 0
+            preserved_stocks_count = 0
             errors = []
             success_items = []
-            unit_details = []
             
+            # Process each row
             for row_num, row in enumerate(reader, start=2):
                 try:
-                    # Skip empty rows
-                    if not row or not any(row):
+                    if not row or len(row) < 2 or not row[0].strip():
                         continue
                     
-                    # Get basic product info
-                    name = row[col_indices['name']].strip() if col_indices['name'] is not None else ''
-                    sku = row[col_indices['sku']].strip() if col_indices['sku'] is not None else ''
-                    category_name = row[col_indices['category']].strip() if col_indices['category'] is not None else ''
-                    base_unit = row[col_indices['base_unit']].strip() if col_indices['base_unit'] is not None else 'piece'
+                    # Extract basic info
+                    name = row[name_idx].strip() if name_idx < len(row) else ''
+                    sku = row[sku_idx].strip() if sku_idx < len(row) else ''
                     
                     if not name or not sku:
                         errors.append(f"Row {row_num}: Product name and SKU are required")
                         continue
+                    
+                    # Extract optional fields
+                    category_name = row[category_idx].strip() if category_idx is not None and category_idx < len(row) else ''
+                    base_unit = row[base_unit_idx].strip() if base_unit_idx is not None and base_unit_idx < len(row) else 'piece'
                     
                     # Get or create category
                     category = None
                     if category_name:
                         category, _ = Category.objects.get_or_create(name=category_name)
                     
-                    # Get pricing
-                    cost_price = float(row[col_indices['cost_price']]) if col_indices['cost_price'] is not None and row[col_indices['cost_price']] else 0
-                    selling_price = float(row[col_indices['selling_price']]) if col_indices['selling_price'] is not None and row[col_indices['selling_price']] else 0
-                    reorder_level = int(row[col_indices['reorder_level']]) if col_indices['reorder_level'] is not None and row[col_indices['reorder_level']] else 10
+                    # Parse prices
+                    try:
+                        cost_price = float(row[cost_price_idx]) if cost_price_idx is not None and cost_price_idx < len(row) and row[cost_price_idx] else 0.0
+                    except (ValueError, TypeError):
+                        cost_price = 0.0
+                        errors.append(f"Row {row_num}: Invalid cost price, using 0")
+                    
+                    try:
+                        selling_price = float(row[selling_price_idx]) if selling_price_idx is not None and selling_price_idx < len(row) and row[selling_price_idx] else 0.0
+                    except (ValueError, TypeError):
+                        selling_price = 0.0
+                        errors.append(f"Row {row_num}: Invalid selling price, using 0")
+                    
+                    try:
+                        reorder_level = int(float(row[reorder_level_idx])) if reorder_level_idx is not None and reorder_level_idx < len(row) and row[reorder_level_idx] else 0
+                    except (ValueError, TypeError):
+                        reorder_level = 0
                     
                     # Check if product exists
                     product, created = Product.objects.get_or_create(
@@ -2182,13 +2208,25 @@ def import_products_csv(request):
                         }
                     )
                     
+                    # Store existing stock if preserving
+                    existing_stocks = {}
+                    if not created and preserve_stock:
+                        for stock_col in stock_columns:
+                            existing_stock = ProductStock.objects.filter(
+                                product=product, 
+                                location=stock_col['location']
+                            ).first()
+                            if existing_stock:
+                                existing_stocks[stock_col['location'].id] = existing_stock.quantity
+                    
+                    # Update existing product if needed
                     if not created:
-                        # Update existing product
                         product.name = name
                         product.category = category
                         product.base_unit = base_unit
                         product.cost_price = cost_price
-                        product.selling_price = selling_price
+                        if selling_price > 0:
+                            product.selling_price = selling_price
                         product.reorder_level = reorder_level
                         product.save()
                         updated_count += 1
@@ -2197,94 +2235,116 @@ def import_products_csv(request):
                         imported_count += 1
                         item_type = 'imported'
                     
-                    # Process units
+                    # Process units - IMPORTANT FIX
                     product_units = []
                     for unit_col in unit_columns:
+                        # Get values from CSV
                         unit_name = row[unit_col['name_idx']].strip() if unit_col['name_idx'] < len(row) else ''
                         unit_qty = row[unit_col['qty_idx']].strip() if unit_col['qty_idx'] < len(row) else ''
-                        unit_price = row[unit_col['price_idx']].strip() if unit_col['price_idx'] < len(row) else ''
+                        unit_price = row[unit_col['price_idx']].strip() if unit_col['price_idx'] is not None and unit_col['price_idx'] < len(row) else ''
                         
-                        if unit_name and unit_qty and unit_price:
-                            try:
-                                unit_qty = float(unit_qty)
-                                unit_price = float(unit_price)
-                                
-                                # Create or update unit
-                                product_unit, unit_created = ProductUnit.objects.get_or_create(
-                                    product=product,
-                                    unit_name=unit_name.lower(),
-                                    defaults={
-                                        'quantity_in_base': unit_qty,
-                                        'selling_price': unit_price,
-                                        'is_default': (unit_name.lower() == base_unit)
-                                    }
-                                )
-                                if not unit_created:
-                                    product_unit.quantity_in_base = unit_qty
-                                    product_unit.selling_price = unit_price
-                                    product_unit.save()
-                                product_units.append({
-                                    'name': unit_name,
-                                    'qty_in_base': unit_qty,
-                                    'price': unit_price,
-                                    'is_default': (unit_name.lower() == base_unit)
-                                })
-                                units_imported += 1
-                            except (ValueError, TypeError):
-                                errors.append(f"Row {row_num}: Invalid unit data for {unit_name}")
+                        # Skip empty or invalid entries
+                        if not unit_name or not unit_qty:
+                            continue
+                        
+                        # Skip if it's the base unit with quantity 1 (redundant)
+                        if unit_name.lower() == base_unit.lower() and float(unit_qty) == 1.0:
+                            continue
+                        
+                        try:
+                            qty_in_base = float(unit_qty)
+                            price = float(unit_price) if unit_price else 0.0
+                            
+                            # Create or update unit
+                            product_unit, unit_created = ProductUnit.objects.get_or_create(
+                                product=product,
+                                unit_name=unit_name.lower(),
+                                defaults={
+                                    'quantity_in_base': qty_in_base,
+                                    'selling_price': price,
+                                    'is_default': False
+                                }
+                            )
+                            
+                            if not unit_created:
+                                # Update existing unit
+                                product_unit.quantity_in_base = qty_in_base
+                                if price > 0:
+                                    product_unit.selling_price = price
+                                product_unit.save()
+                            
+                            product_units.append(unit_name)
+                            units_imported += 1
+                            
+                        except (ValueError, TypeError) as e:
+                            errors.append(f"Row {row_num}: Invalid unit data for {unit_name}: {str(e)}")
                     
                     # Process stock for each location
                     location_stocks = []
-                    for idx, location in stock_columns.items():
+                    for stock_col in stock_columns:
+                        idx = stock_col['idx']
+                        location = stock_col['location']
+                        
                         if idx < len(row) and row[idx]:
                             try:
-                                quantity = int(row[idx])
-                                if quantity > 0:
-                                    stock, stock_created = ProductStock.objects.get_or_create(
-                                        product=product,
-                                        location=location,
-                                        defaults={'quantity': quantity}
-                                    )
-                                    if not stock_created:
-                                        stock.quantity = quantity
-                                        stock.save()
-                                    location_stocks.append(location.name)
-                                    stock_updates_count += 1
+                                csv_quantity = int(float(row[idx]))
+                                
+                                # Check if we should preserve existing stock
+                                if location.id in existing_stocks:
+                                    # Preserve existing stock
+                                    existing_qty = existing_stocks[location.id]
+                                    location_stocks.append(f"{location.name}: {existing_qty} (preserved)")
+                                    preserved_stocks_count += 1
+                                else:
+                                    # Set new stock
+                                    if csv_quantity > 0 or not created:
+                                        stock, _ = ProductStock.objects.get_or_create(
+                                            product=product,
+                                            location=location,
+                                            defaults={'quantity': csv_quantity}
+                                        )
+                                        if not stock.created and not preserve_stock:
+                                            stock.quantity = csv_quantity
+                                            stock.save()
+                                        location_stocks.append(f"{location.name}: {csv_quantity}")
                             except (ValueError, TypeError):
                                 errors.append(f"Row {row_num}: Invalid stock quantity for {location.name}")
+                        elif location.id in existing_stocks:
+                            # Preserve existing stock even if CSV has no value
+                            existing_qty = existing_stocks[location.id]
+                            location_stocks.append(f"{location.name}: {existing_qty} (preserved)")
+                            preserved_stocks_count += 1
                     
                     success_items.append({
                         'type': item_type,
                         'name': product.name,
                         'sku': product.sku,
                         'base_unit': product.base_unit,
-                        'units': [u['name'] for u in product_units],
+                        'units': product_units,
                         'locations': location_stocks
                     })
                     
-                    if product_units:
-                        unit_details.append({
-                            'id': product.id,
-                            'name': product.name,
-                            'base_unit': product.base_unit,
-                            'units': product_units
-                        })
-                    
                 except Exception as e:
                     errors.append(f"Row {row_num}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
             
             # Prepare results
             import_results = {
                 'total_processed': imported_count + updated_count,
                 'imported_count': imported_count,
                 'updated_count': updated_count,
-                'stock_updates_count': stock_updates_count,
                 'units_imported': units_imported,
+                'preserved_stocks_count': preserved_stocks_count,
                 'errors': errors,
                 'error_count': len(errors),
-                'success_items': success_items,
-                'unit_details': unit_details
+                'success_items': success_items[:20],  # Limit to 20 items for display
             }
+            
+            messages.success(
+                request, 
+                f"Import completed! {imported_count} new, {updated_count} updated, {units_imported} units imported."
+            )
             
             context = {
                 'import_results': import_results,
@@ -2296,7 +2356,9 @@ def import_products_csv(request):
             return render(request, 'inventory/import_products.html', context)
             
         except Exception as e:
-            messages.error(request, f"Error reading CSV file: {str(e)}")
+            messages.error(request, f"Error processing CSV file: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return redirect('inventory:import_products')
     
     else:
@@ -2307,6 +2369,11 @@ def import_products_csv(request):
         }
         return render(request, 'inventory/import_products.html', context)
 
+def import_products_fixed(request):
+    """Fixed product import with units"""
+    from .import_utils import process_product_import
+    return process_product_import(request)
+        
 
 @login_required
 def export_sales_csv(request):
@@ -2372,10 +2439,9 @@ def export_products_template(request):
         'Name', 'SKU', 'Category', 'Base Unit', 'Cost Price', 'Selling Price', 'Reorder Level'
     ]
     
-    # Unit columns
-    header.extend(['Unit1_Name', 'Unit1_QtyInBase', 'Unit1_Price'])
-    header.extend(['Unit2_Name', 'Unit2_QtyInBase', 'Unit2_Price'])
-    header.extend(['Unit3_Name', 'Unit3_QtyInBase', 'Unit3_Price'])
+    # Unit columns - up to 5 units
+    for i in range(1, 6):
+        header.extend([f'Unit{i}_Name', f'Unit{i}_QtyInBase', f'Unit{i}_Price'])
     
     # Location columns
     user_locations = get_user_locations(request.user)
@@ -2384,19 +2450,36 @@ def export_products_template(request):
     
     writer.writerow(header)
     
-    # Example row
+    # Example row with proper unit examples
     example_row = [
-        'Premium Emulsion Paint', 'PEP-001', 'Paint Products', 'piece', '15000', '25000', '100',
-        'piece', '1', '25000',
-        'packet', '4', '95000',
-        'carton', '48', '1080000',
+        'Example Product', 'EXAMPLE-001', 'General', 'piece', '1000', '1500', '20',
+        'piece', '1', '1500',           # Unit1: Base unit
+        'packet', '4', '5800',          # Unit2: Packet of 4 pieces
+        'carton', '48', '65000',        # Unit3: Carton of 48 pieces
+        '', '', '',                      # Unit4: Empty
+        '', '', '',                      # Unit5: Empty
     ]
     
     # Add example stock for each location
     for location in user_locations:
-        example_row.append('100')
+        example_row.append('10')  # Example quantity
     
     writer.writerow(example_row)
+    
+    # Add a second example showing different unit types
+    example_row2 = [
+        'Another Product', 'EXAMPLE-002', 'General', 'piece', '2000', '3000', '15',
+        '', '', '',                      # No unit1
+        'box', '10', '28000',            # Unit2: Box of 10 pieces
+        '', '', '',                      # No unit3
+        '', '', '',                      # No unit4
+        '', '', '',                      # No unit5
+    ]
+    
+    for location in user_locations:
+        example_row2.append('5')
+    
+    writer.writerow(example_row2)
     
     return response
 
@@ -8395,3 +8478,6 @@ def stock_movement_report(request):
             'categories': Category.objects.all(),
             'locations': get_user_locations(request.user),
         })
+
+
+        
