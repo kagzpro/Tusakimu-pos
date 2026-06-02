@@ -230,17 +230,15 @@
                                         {% endif %}
                                     </div>
                                 </div>
-                            </td>
-                            <td>
-                                <code class="small">{{ item.product.sku|default:"-" }}</code>
-                            </td>
+                            </span>
+                            <td><code class="small">{{ item.product.sku|default:"-" }}</code></span>
                             <td>
                                 {% if item.product.category %}
                                 <span class="badge bg-light text-dark">{{ item.product.category.name }}</span>
                                 {% else %}
                                 <span class="text-muted">-</span>
                                 {% endif %}
-                            </td>
+                            </span>
                             <td class="units-column">
                                 <div class="units-container">
                                     {% if item.product.units.all %}
@@ -251,9 +249,10 @@
                                             <option value="{{ unit.id }}" 
                                                     data-unit-name="{{ unit.unit_name }}"
                                                     data-base-quantity="{{ unit.quantity_in_base }}"
-                                                    data-selling-price="{{ unit.selling_price }}">
+                                                    data-selling-price="{{ unit.selling_price }}"
+                                                    {% if unit.is_default %}selected{% endif %}>
                                                 {{ unit.unit_name|title }} 
-                                                (1 = {{ unit.quantity_in_base }} {{ item.product.base_unit }}s)
+                                                (1 = {{ unit.quantity_in_base|floatformat:"0" }} {{ item.product.base_unit }}s)
                                                 - UGX {{ unit.selling_price|floatformat:0 }}
                                             </option>
                                             {% endfor %}
@@ -262,7 +261,7 @@
                                             <i class="fas fa-info-circle"></i> 
                                             <span class="unit-conversion-info">
                                                 {% with default_unit=item.product.units.all|first %}
-                                                1 {{ default_unit.unit_name }} = {{ default_unit.quantity_in_base }} {{ item.product.base_unit }}s
+                                                1 {{ default_unit.unit_name }} = {{ default_unit.quantity_in_base|floatformat:"0" }} {{ item.product.base_unit }}s
                                                 {% endwith %}
                                             </span>
                                         </div>
@@ -278,12 +277,11 @@
                                         </div>
                                     {% endif %}
                                 </div>
-                            </td>
+                            </span>
                             <td class="text-end">
                                 <span class="fw-bold text-success">UGX <span class="selling-price-display">{{ item.product.selling_price|floatformat:0 }}</span></span>
                                 <div class="small text-muted">per <span class="base-unit-name">{{ item.product.base_unit|default:"unit" }}</span></div>
-                            </td>
-                            <!-- STOCK BY LOCATION - BOLD QUANTITIES -->
+                            </span>
                             <td>
                                 <div class="location-quantities">
                                     {% if item.stocks %}
@@ -293,8 +291,8 @@
                                                  data-base-quantity="{{ stock.quantity }}">
                                                 <span class="location-name small text-muted">{{ stock.location.name }}</span>
                                                 <span class="quantity-badge badge fw-bold fs-6 {% if stock.quantity <= item.product.reorder_level %}bg-warning{% else %}bg-light text-dark{% endif %}"
-                                                      style="font-weight: bold !important; font-size: 1rem !important; min-width: 60px;">
-                                                    {{ stock.quantity }}
+                                                      style="font-weight: bold !important; font-size: 1rem !important; min-width: 80px;">
+                                                    {{ stock.quantity }} {{ item.product.base_unit }}s
                                                 </span>
                                             </div>
                                         {% endfor %}
@@ -305,7 +303,7 @@
                                         <span class="text-muted small">No stock records</span>
                                     {% endif %}
                                 </div>
-                            </td>
+                            </span>
                             <td class="text-center">
                                 {% if item.total_stock == 0 %}
                                 <span class="badge bg-danger">Out of Stock</span>
@@ -314,7 +312,7 @@
                                 {% else %}
                                 <span class="badge bg-success">In Stock</span>
                                 {% endif %}
-                            </td>
+                            </span>
                             <td class="text-center">
                                 <div class="btn-group btn-group-sm">
                                     <a href="{% url 'inventory:product_edit' item.product.id %}" 
@@ -332,8 +330,8 @@
                                         <i class="fas fa-trash"></i>
                                     </a>
                                 </div>
-                            </td>
-                        </tr>
+                            </span>
+                        </td>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -422,7 +420,6 @@
     background-color: #f8f9fa !important;
 }
 
-/* Unit selector styles */
 .unit-selector {
     font-size: 0.8rem;
     padding: 0.25rem 0.5rem;
@@ -434,7 +431,6 @@
     min-width: 220px;
 }
 
-/* Location quantities styles - BOLD NUMBERS */
 .location-quantities {
     max-height: 120px;
     overflow-y: auto;
@@ -474,17 +470,11 @@
 
 .quantity-badge {
     font-size: 0.9rem !important;
-    min-width: 60px;
+    min-width: 80px;
     text-align: center;
     font-weight: bold !important;
     padding: 4px 8px !important;
     border-radius: 6px !important;
-}
-
-/* Make quantity numbers extra bold */
-.quantity-badge {
-    font-weight: 800 !important;
-    font-size: 1rem !important;
 }
 </style>
 
@@ -496,59 +486,98 @@ document.addEventListener('DOMContentLoaded', function() {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
 
-    // Function to format numbers correctly
+    // Function to format numbers
     function formatNumber(value) {
-        let num = typeof value === 'string' ? parseFloat(value) : value;
+        let num = parseFloat(value);
         if (isNaN(num)) return '0';
         return num.toLocaleString('en-US');
     }
 
-    // Function to update stock display when unit changes
-    function updateStockForUnit(productId, unitSelect, totalStock, baseUnit) {
+    // Store original base stock values
+    document.querySelectorAll('.product-row').forEach(row => {
+        const locationItems = row.querySelectorAll('.location-stock-item');
+        locationItems.forEach(item => {
+            const badge = item.querySelector('.quantity-badge');
+            if (badge) {
+                const badgeText = badge.innerText;
+                const numberMatch = badgeText.match(/(\d+)/);
+                if (numberMatch) {
+                    const baseQty = parseInt(numberMatch[1]);
+                    item.dataset.baseQuantity = baseQty;
+                }
+            }
+        });
+    });
+
+    // Function to update stock display when unit changes - FIXED VERSION
+    function updateStockForUnit(unitSelect) {
         const selectedOption = unitSelect.options[unitSelect.selectedIndex];
         const baseQuantity = parseFloat(selectedOption.dataset.baseQuantity);
         const unitName = selectedOption.dataset.unitName;
         let sellingPrice = parseFloat(selectedOption.dataset.sellingPrice);
         
         const row = unitSelect.closest('tr');
+        const baseUnit = row.querySelector('.base-unit-name')?.textContent || 'unit';
+        
+        // Update price display
         const priceDisplay = row.querySelector('.selling-price-display');
         if (priceDisplay) {
             priceDisplay.textContent = formatNumber(sellingPrice);
         }
         
+        // Update conversion info
         const conversionSpan = row.querySelector('.unit-conversion-info');
         if (conversionSpan) {
             conversionSpan.innerHTML = `1 ${unitName} = ${baseQuantity} ${baseUnit}s`;
         }
         
+        // Update stock quantities for each location
         const locationItems = row.querySelectorAll('.location-stock-item');
         locationItems.forEach(item => {
             const baseStock = parseFloat(item.dataset.baseQuantity);
-            const stockInUnit = baseStock / baseQuantity;
-            const badge = item.querySelector('.quantity-badge');
-            if (badge) {
-                badge.innerHTML = `${stockInUnit.toFixed(2)} ${unitName}s`;
-                if (baseStock <= (row.dataset.reorderLevel || 0)) {
-                    badge.classList.remove('bg-light', 'bg-success');
-                    badge.classList.add('bg-warning');
-                } else if (baseStock === 0) {
-                    badge.classList.remove('bg-light', 'bg-warning');
-                    badge.classList.add('bg-danger');
-                } else {
-                    badge.classList.remove('bg-warning', 'bg-danger');
-                    badge.classList.add('bg-light', 'text-dark');
+            if (baseStock) {
+                let stockInUnit = baseStock / baseQuantity;
+                const badge = item.querySelector('.quantity-badge');
+                
+                if (badge) {
+                    // Format the stock display based on the unit
+                    if (stockInUnit >= 1) {
+                        // Show whole units if possible
+                        if (stockInUnit === Math.floor(stockInUnit)) {
+                            badge.innerHTML = `${Math.floor(stockInUnit)} ${unitName}s`;
+                        } else {
+                            badge.innerHTML = `${stockInUnit.toFixed(1)} ${unitName}s`;
+                        }
+                    } else if (stockInUnit > 0) {
+                        // Less than 1 unit - show in base units
+                        badge.innerHTML = `${Math.floor(baseStock)} ${baseUnit}s`;
+                    } else {
+                        badge.innerHTML = `0 ${unitName}s`;
+                    }
+                    
+                    // Update badge color based on stock level
+                    const reorderLevel = parseFloat(row.dataset.reorderLevel) || 0;
+                    if (baseStock <= reorderLevel && baseStock > 0) {
+                        badge.classList.remove('bg-light', 'bg-success');
+                        badge.classList.add('bg-warning');
+                    } else if (baseStock === 0) {
+                        badge.classList.remove('bg-light', 'bg-warning');
+                        badge.classList.add('bg-danger');
+                    } else {
+                        badge.classList.remove('bg-warning', 'bg-danger');
+                        badge.classList.add('bg-light', 'text-dark');
+                    }
                 }
             }
         });
     }
     
+    // Setup unit selectors
     const unitSelectors = document.querySelectorAll('.unit-selector');
     unitSelectors.forEach(selector => {
-        const productId = selector.dataset.productId;
-        const totalStock = parseFloat(selector.dataset.totalStock);
         const row = selector.closest('tr');
-        const baseUnit = row.querySelector('.base-unit-name')?.textContent || 'unit';
         
+        // Store reorder level
         const reorderSpan = row.querySelector('.text-warning');
         if (reorderSpan && reorderSpan.textContent.includes('Reorder at')) {
             const reorderMatch = reorderSpan.textContent.match(/(\d+)/);
@@ -557,8 +586,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
+        // Add change event listener
         selector.addEventListener('change', function() {
-            updateStockForUnit(productId, this, totalStock, baseUnit);
+            updateStockForUnit(this);
         });
     });
     
