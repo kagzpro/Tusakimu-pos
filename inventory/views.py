@@ -8841,6 +8841,400 @@ def stock_movement_report(request):
             'categories': Category.objects.all(),
             'locations': get_user_locations(request.user),
         })
+# inventory/views.py - Complete Bulk Edit Views with Units Support
 
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
+from django.http import JsonResponse
+from django.shortcuts import render, get_object_or_404
+from django.views.decorators.http import require_POST
+from django.db import transaction
+from django.contrib import messages
+from django.db.models import Q, Sum, F
+import json
 
+# =======================
+# BULK PRODUCT EDIT VIEWS
+# =======================
+
+@login_required
+def bulk_product_edit(request):
+    """Bulk edit products with units and stock management"""
+    
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    
+    # Get filter parameters
+    search_query = request.GET.get('q', '')
+    category_filter = request.GET.get('category', '')
+    location_filter = request.GET.get('location', '')
+    
+    # Get all products with related data
+    products = Product.objects.prefetch_related(
+        'units',
+        'stocks',
+        'stocks__location',
+        'category'
+    ).order_by('name')
+    
+    # Apply filters
+    if search_query:
+        products = products.filter(
+            Q(name__icontains=search_query) |
+            Q(sku__icontains=search_query)
+        )
+    
+    if category_filter:
+        products = products.filter(category_id=category_filter)
+    
+    # Get user locations for stock display
+    from core.utils import get_user_locations
+    user_locations = get_user_locations(request.user)
+    
+    # Prepare product data with stock information
+    product_data = []
+    for product in products:
+        # Get stock for each location
+        stocks = {}
+        for stock in product.stocks.filter(location__in=user_locations):
+            stocks[stock.location.id] = {
+                'quantity': stock.quantity,
+                'location_name': stock.location.name
+            }
         
+        # Get units with prices
+        units = []
+        for unit in product.units.all():
+            units.append({
+                'id': unit.id,
+                'name': unit.unit_name,
+                'quantity_in_base': float(unit.quantity_in_base),
+                'selling_price': float(unit.selling_price),
+                'cost_price': float(product.cost_price) * float(unit.quantity_in_base),
+                'is_default': unit.is_default,
+                'conversion_text': f"1 {unit.unit_name} = {unit.quantity_in_base} {product.base_unit}s"
+            })
+        
+        # If no units, create default
+        if not units:
+            units.append({
+                'id': None,
+                'name': product.base_unit or 'piece',
+                'quantity_in_base': 1,
+                'selling_price': float(product.selling_price),
+                'cost_price': float(product.cost_price),
+                'is_default': True,
+                'conversion_text': f"Base unit: 1 {product.base_unit}"
+            })
+        
+        product_data.append({
+            'product': product,
+            'stocks': stocks,
+            'units': units,
+            'total_stock': sum(s['quantity'] for s in stocks.values()),
+            'category_name': product.category.name if product.category else 'Uncategorized',
+        })
+    
+    # Get filter options
+    categories = Category.objects.all()
+    locations = user_locations
+    
+    context = {
+        'products': products,  # For compatibility with template
+        'product_data': product_data,
+        'categories': categories,
+        'locations': locations,
+        'total_products': products.count(),
+        'search_query': search_query,
+        'category_filter': category_filter,
+        'location_filter': location_filter,
+    }
+    return render(request, 'inventory/bulk_product_edit.html', context)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def bulk_update_product(request):
+    """Update a single product's unit price and stock via AJAX"""
+    
+    if not request.user.is_superuser:
+        return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+    
+    try:
+        product_id = request.POST.get('product_id')
+        unit_id = request.POST.get('unit_id')
+        stock_qty = request.POST.get('stock_qty')
+        selling_price = request.POST.get('selling_price')
+        location_id = request.POST.get('location_id')
+        
+        # Get product
+        product = get_object_or_404(Product, id=product_id)
+        
+        # Update unit price if provided
+        if unit_id and unit_id != 'null' and unit_id != '':
+            try:
+                unit = ProductUnit.objects.get(id=unit_id, product=product)
+                if selling_price and selling_price != '':
+                    new_price = float(selling_price)
+                    unit.selling_price = new_price
+                    unit.save()
+                    
+                    # If this is the default unit, also update product selling price
+                    if unit.is_default:
+                        product.selling_price = new_price
+                        product.save()
+            except ProductUnit.DoesNotExist:
+                pass
+        elif selling_price and selling_price != '':
+            # Update product base selling price
+            product.selling_price = float(selling_price)
+            product.save()
+        
+        # Update stock quantity if provided
+        if stock_qty is not None and stock_qty != '':
+            new_stock = float(stock_qty)
+            
+            if location_id and location_id != 'null' and location_id != '':
+                # Update specific location stock
+                from core.models import Location
+                location = get_object_or_404(Location, id=location_id)
+                
+                stock, created = ProductStock.objects.get_or_create(
+                    product=product,
+                    location=location,
+                    defaults={'quantity': new_stock}
+                )
+                if not created:
+                    stock.quantity = new_stock
+                    stock.save()
+            else:
+                # Update first available stock (legacy support)
+                stock = ProductStock.objects.filter(product=product).first()
+                if stock:
+                    stock.quantity = new_stock
+                    stock.save()
+                else:
+                    # Create default stock if none exists
+                    from core.models import Location
+                    default_location = Location.objects.first()
+                    if default_location:
+                        ProductStock.objects.create(
+                            product=product,
+                            location=default_location,
+                            quantity=new_stock
+                        )
+        
+        # Get updated product data for response
+        updated_units = []
+        for unit in product.units.all():
+            updated_units.append({
+                'id': unit.id,
+                'name': unit.unit_name,
+                'quantity_in_base': float(unit.quantity_in_base),
+                'selling_price': float(unit.selling_price),
+            })
+        
+        # Get updated stock data
+        stocks_data = {}
+        for stock in product.stocks.all():
+            stocks_data[stock.location.id] = {
+                'quantity': float(stock.quantity),
+                'location_name': stock.location.name
+            }
+        
+        return JsonResponse({
+            'success': True,
+            'product_id': product.id,
+            'product_name': product.name,
+            'selling_price': float(product.selling_price),
+            'units': updated_units,
+            'stocks': stocks_data,
+            'total_stock': sum(s['quantity'] for s in stocks_data.values())
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def bulk_update_multiple_products(request):
+    """Bulk update multiple products at once"""
+    
+    if not request.user.is_superuser:
+        return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+    
+    try:
+        data = json.loads(request.body)
+        action = data.get('action')
+        product_ids = data.get('product_ids', [])
+        
+        if not product_ids:
+            return JsonResponse({'success': False, 'error': 'No products selected'})
+        
+        products = Product.objects.filter(id__in=product_ids)
+        updated_count = 0
+        
+        if action == 'update_price_percentage':
+            # Apply percentage increase/decrease to all products
+            percentage = float(data.get('percentage', 0))
+            price_type = data.get('price_type', 'selling')  # selling or cost
+            
+            for product in products:
+                if price_type == 'selling':
+                    new_price = product.selling_price * (1 + percentage / 100)
+                    product.selling_price = max(0, new_price)
+                    product.save()
+                    
+                    # Also update unit prices proportionally
+                    for unit in product.units.all():
+                        new_unit_price = unit.selling_price * (1 + percentage / 100)
+                        unit.selling_price = max(0, new_unit_price)
+                        unit.save()
+                else:
+                    new_cost = product.cost_price * (1 + percentage / 100)
+                    product.cost_price = max(0, new_cost)
+                    product.save()
+                
+                updated_count += 1
+            
+            message = f"Prices updated for {updated_count} products ({percentage:+.1f}%)"
+            
+        elif action == 'update_category':
+            # Bulk update category
+            category_id = data.get('category_id')
+            category = get_object_or_404(Category, id=category_id)
+            
+            for product in products:
+                product.category = category
+                product.save()
+                updated_count += 1
+            
+            message = f"Category updated for {updated_count} products"
+            
+        elif action == 'update_reorder_level':
+            # Bulk update reorder level
+            reorder_level = int(data.get('reorder_level', 10))
+            
+            for product in products:
+                product.reorder_level = reorder_level
+                product.save()
+                updated_count += 1
+            
+            message = f"Reorder level updated for {updated_count} products"
+            
+        elif action == 'update_base_unit':
+            # Bulk update base unit (careful with this)
+            base_unit = data.get('base_unit', 'piece')
+            
+            for product in products:
+                product.base_unit = base_unit
+                product.save()
+                updated_count += 1
+            
+            message = f"Base unit updated for {updated_count} products"
+            
+        elif action == 'bulk_stock_update':
+            # Bulk stock update for specific location
+            location_id = data.get('location_id')
+            operation = data.get('operation')  # add, subtract, set
+            value = float(data.get('value', 0))
+            
+            from core.models import Location
+            location = get_object_or_404(Location, id=location_id)
+            
+            for product in products:
+                stock, created = ProductStock.objects.get_or_create(
+                    product=product,
+                    location=location,
+                    defaults={'quantity': 0}
+                )
+                
+                if operation == 'add':
+                    stock.quantity += value
+                elif operation == 'subtract':
+                    stock.quantity = max(0, stock.quantity - value)
+                elif operation == 'set':
+                    stock.quantity = max(0, value)
+                
+                stock.save()
+                updated_count += 1
+            
+            message = f"Stock updated for {updated_count} products at {location.name}"
+            
+        else:
+            return JsonResponse({'success': False, 'error': 'Invalid action'})
+        
+        return JsonResponse({
+            'success': True,
+            'message': message,
+            'updated_count': updated_count
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def bulk_delete_products(request):
+    """Bulk delete products (only those without transactions)"""
+    
+    if not request.user.is_superuser:
+        return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+    
+    try:
+        data = json.loads(request.body)
+        product_ids = data.get('product_ids', [])
+        
+        if not product_ids:
+            return JsonResponse({'success': False, 'error': 'No products selected'})
+        
+        deleted_count = 0
+        skipped_products = []
+        
+        for product_id in product_ids:
+            product = get_object_or_404(Product, id=product_id)
+            
+            # Check if product has any transactions
+            has_purchases = PurchaseItem.objects.filter(product=product).exists()
+            has_sales = SaleItem.objects.filter(product=product).exists()
+            has_transfers = StockTransfer.objects.filter(product=product).exists()
+            
+            if has_purchases or has_sales or has_transfers:
+                skipped_products.append(product.name)
+                continue
+            
+            # Delete units first
+            product.units.all().delete()
+            # Delete stocks
+            product.stocks.all().delete()
+            # Delete product
+            product.delete()
+            deleted_count += 1
+        
+        message = f"Deleted {deleted_count} products"
+        if skipped_products:
+            message += f". Skipped {len(skipped_products)} products with transactions: {', '.join(skipped_products[:5])}"
+        
+        return JsonResponse({
+            'success': True,
+            'message': message,
+            'deleted_count': deleted_count,
+            'skipped_count': len(skipped_products)
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
