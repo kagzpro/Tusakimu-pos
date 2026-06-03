@@ -107,6 +107,8 @@ from django.views.decorators.http import require_GET
 
 # views.py - Update your product_list view
 
+# inventory/views.py
+
 @login_required
 def product_list(request):
     """Display products with their units of measure"""
@@ -119,19 +121,18 @@ def product_list(request):
         Prefetch('stocks', 
             queryset=ProductStock.objects.filter(location__in=user_locations).select_related('location')
         ),
-        Prefetch('units',
+        Prefetch('units',  # Prefetch units for each product
             queryset=ProductUnit.objects.all().order_by('quantity_in_base')
         )
     ).distinct()
     
-    # Handle search - REMOVE 'barcode' since it doesn't exist
+    # Handle search
     search_query = request.GET.get('q', '')
     if search_query:
         products = products.filter(
             Q(name__icontains=search_query) |
             Q(sku__icontains=search_query) |
             Q(category__name__icontains=search_query)
-            # REMOVED: Q(barcode__icontains=search_query)  # This field doesn't exist
         )
     
     # Handle category filter
@@ -141,7 +142,7 @@ def product_list(request):
     
     # Handle sorting
     sort_by = request.GET.get('sort', 'name')
-    if sort_by in ['name', 'sku', 'category__name']:
+    if sort_by in ['name', '-name', 'sku', '-sku', 'category__name', '-category__name']:
         products = products.order_by(sort_by)
     else:
         products = products.order_by('name')
@@ -157,7 +158,7 @@ def product_list(request):
     out_of_stock_count = 0
     
     for product in page_obj:
-        stocks = product.stocks.all()
+        stocks = product.stocks.all()  # Already prefetched
         total_stock = sum(stock.quantity for stock in stocks)
         
         if total_stock == 0:
@@ -165,14 +166,40 @@ def product_list(request):
         elif total_stock <= product.reorder_level:
             low_stock_count += 1
         
+        # Get units for this product with ALL necessary data
         units = product.units.all()
+        
+        # Prepare unit data with all required fields
+        units_data = []
+        for unit in units:
+            units_data.append({
+                'id': unit.id,
+                'unit_name': unit.unit_name,
+                'quantity_in_base': float(unit.quantity_in_base),
+                'selling_price': float(unit.selling_price) if unit.selling_price else float(product.selling_price),
+                'is_default': unit.is_default,
+                'cost_price': float(product.cost_price) * float(unit.quantity_in_base) if product.cost_price else 0,
+                'price_per_base': float(unit.selling_price) / float(unit.quantity_in_base) if unit.selling_price and unit.quantity_in_base else 0
+            })
+        
+        # If no units defined, create a default base unit
+        if not units_data:
+            units_data.append({
+                'id': None,
+                'unit_name': product.base_unit or 'piece',
+                'quantity_in_base': 1,
+                'selling_price': float(product.selling_price) if product.selling_price else 0,
+                'is_default': True,
+                'cost_price': float(product.cost_price) if product.cost_price else 0,
+                'price_per_base': float(product.selling_price) if product.selling_price else 0
+            })
         
         product_data.append({
             'product': product,
             'stocks': stocks,
             'total_stock': total_stock,
-            'units': units,
-            'default_unit': units.filter(is_default=True).first() or (units.first() if units.exists() else None)
+            'units': units_data,  # Pass the enriched unit data
+            'default_unit': next((u for u in units_data if u['is_default']), units_data[0] if units_data else None)
         })
     
     context = {
@@ -187,7 +214,6 @@ def product_list(request):
         'user_locations': user_locations,
     }
     return render(request, 'inventory/product_list.html', context)
-
 
 @login_required
 @require_GET
@@ -375,6 +401,68 @@ def product_detail(request, product_id):
     return render(request, 'inventory/product_detail.html', context)
 
 
+# views.py - Add these API endpoints
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from .models import ProductUnit
+import json
+
+@login_required
+@require_http_methods(["POST"])
+def update_unit_price(request):
+    """API endpoint to update a unit's selling price"""
+    try:
+        data = json.loads(request.body)
+        unit_id = data.get('unit_id')
+        selling_price = data.get('selling_price')
+        
+        if not unit_id or selling_price is None:
+            return JsonResponse({'success': False, 'error': 'Missing required fields'}, status=400)
+        
+        try:
+            unit = ProductUnit.objects.get(id=unit_id)
+            # Check if user has permission (product belongs to user's locations)
+            unit.selling_price = float(selling_price)
+            unit.save()
+            
+            return JsonResponse({'success': True, 'message': 'Price updated successfully'})
+        except ProductUnit.DoesNotExist:
+            return JsonResponse({'success': False, 'error': 'Unit not found'}, status=404)
+            
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def set_default_unit(request):
+    """API endpoint to set a unit as default"""
+    try:
+        data = json.loads(request.body)
+        unit_id = data.get('unit_id')
+        product_id = data.get('product_id')
+        
+        if not unit_id or not product_id:
+            return JsonResponse({'success': False, 'error': 'Missing required fields'}, status=400)
+        
+        # Reset all units for this product
+        ProductUnit.objects.filter(product_id=product_id).update(is_default=False)
+        
+        # Set the selected unit as default
+        unit = ProductUnit.objects.get(id=unit_id, product_id=product_id)
+        unit.is_default = True
+        unit.save()
+        
+        return JsonResponse({'success': True, 'message': 'Default unit updated successfully'})
+        
+    except ProductUnit.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Unit not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
 
 @login_required
 @transaction.atomic
@@ -388,12 +476,14 @@ def product_add(request):
             # Get basic product data
             name = request.POST.get('name', '').strip()
             category_id = request.POST.get('category', '')
-            base_unit = request.POST.get('base_unit', 'piece')  # ADD THIS
+            base_unit = request.POST.get('base_unit', 'piece')
             cost_price = request.POST.get('cost_price', '0')
             selling_price = request.POST.get('selling_price', '0')
             location_id = request.POST.get('location', '')
             qty = request.POST.get('quantity', '0')
             reorder_level = request.POST.get('reorder_level', '10')
+            sku = request.POST.get('sku', '')  # Allow custom SKU
+            barcode = request.POST.get('barcode', '')  # Optional barcode
             
             # Validate required fields
             if not name:
@@ -418,9 +508,9 @@ def product_add(request):
             
             # Convert numeric fields
             try:
-                cost_price = float(cost_price)
+                cost_price = float(cost_price) if cost_price else 0
                 selling_price = float(selling_price) if selling_price else 0
-                qty = int(qty) if qty else 0
+                qty = float(qty) if qty else 0
                 reorder_level = int(reorder_level) if reorder_level else 10
             except ValueError:
                 messages.error(request, "Please enter valid numeric values")
@@ -433,19 +523,29 @@ def product_add(request):
                 messages.error(request, "Invalid category selected")
                 return redirect('inventory:product_add')
             
-            # Generate unique SKU
-            sku = f"SKU-{uuid.uuid4().hex[:8].upper()}"
+            # Generate or use custom SKU
+            if not sku:
+                sku = f"SKU-{uuid.uuid4().hex[:8].upper()}"
             
-            # Create product with base unit
+            # Check if SKU already exists
+            if Product.objects.filter(sku=sku).exists():
+                sku = f"{sku}-{uuid.uuid4().hex[:4].upper()}"
+            
+            # Create product WITHOUT created_by field
             product = Product(
                 name=name,
                 category=category,
                 sku=sku,
-                base_unit=base_unit,  # ADD THIS
+                base_unit=base_unit,
                 cost_price=cost_price,
-                selling_price=selling_price,
+                selling_price=selling_price if selling_price > 0 else cost_price * 1.3,  # Default markup
                 reorder_level=reorder_level
             )
+            
+            # Add barcode if provided and field exists
+            if barcode and hasattr(product, 'barcode'):
+                product.barcode = barcode
+            
             product.save()
             
             # Create product stock
@@ -457,26 +557,63 @@ def product_add(request):
                 )
                 stock.save()
             
-            # ADD THIS - Create units of measure
-            # Get units from form (multiple unit rows)
+            # Create units of measure
             unit_names = request.POST.getlist('unit_name[]')
             unit_quantities = request.POST.getlist('unit_quantity[]')
             unit_prices = request.POST.getlist('unit_price[]')
             
-            for i in range(len(unit_names)):
-                if unit_names[i] and unit_quantities[i] and unit_prices[i]:
-                    try:
-                        ProductUnit.objects.create(
-                            product=product,
-                            unit_name=unit_names[i],
-                            quantity_in_base=float(unit_quantities[i]),
-                            selling_price=float(unit_prices[i]),
-                            is_default=(unit_names[i] == base_unit)
-                        )
-                    except Exception as e:
-                        print(f"Error creating unit: {e}")
+            created_units = 0
+            has_default = False
             
-            messages.success(request, f"Product '{name}' added successfully with {ProductUnit.objects.filter(product=product).count()} units!")
+            for i in range(len(unit_names)):
+                if unit_names[i] and unit_quantities[i]:
+                    try:
+                        unit_name = unit_names[i].strip().lower()
+                        unit_quantity = float(unit_quantities[i])
+                        unit_price = float(unit_prices[i]) if i < len(unit_prices) and unit_prices[i] else (selling_price * unit_quantity)
+                        
+                        # Check if this is the base unit
+                        is_base_unit = (unit_name == base_unit.lower())
+                        
+                        # Create the unit
+                        unit = ProductUnit.objects.create(
+                            product=product,
+                            unit_name=unit_name,
+                            quantity_in_base=unit_quantity,
+                            selling_price=unit_price,
+                            is_default=is_base_unit
+                        )
+                        created_units += 1
+                        
+                        if is_base_unit:
+                            has_default = True
+                            
+                    except (ValueError, TypeError) as e:
+                        print(f"Error creating unit {unit_names[i]}: {e}")
+                        continue
+            
+            # If no default unit was set, set the first unit as default
+            if not has_default and created_units > 0:
+                first_unit = ProductUnit.objects.filter(product=product).first()
+                if first_unit:
+                    first_unit.is_default = True
+                    first_unit.save()
+            
+            # Create a default base unit if no units were created
+            if created_units == 0:
+                ProductUnit.objects.create(
+                    product=product,
+                    unit_name=base_unit,
+                    quantity_in_base=1,
+                    selling_price=selling_price,
+                    is_default=True
+                )
+                created_units = 1
+            
+            success_message = f"Product '{name}' added successfully! "
+            success_message += f"SKU: {sku}, Stock: {qty} {base_unit}s, Units: {created_units}"
+            messages.success(request, success_message)
+            
             return redirect('inventory:product_list')
             
         except Exception as e:
@@ -489,12 +626,15 @@ def product_add(request):
             return render(request, 'inventory/product_add.html', context)
     
     else:
+        # Generate a suggested SKU for new product
+        suggested_sku = f"SKU-{uuid.uuid4().hex[:8].upper()}"
+        
         context = {
             'categories': categories,
             'locations': user_locations,
+            'suggested_sku': suggested_sku,
         }
         return render(request, 'inventory/product_add.html', context)
-
 
 @login_required
 @transaction.atomic
