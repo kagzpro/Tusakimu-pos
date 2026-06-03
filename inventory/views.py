@@ -101,10 +101,15 @@ def inventory_dashboard(request):
 # inventory/views.py
 
 
+from django.http import JsonResponse
+from django.db.models import Q, F, Sum
+from django.views.decorators.http import require_GET
+
+# views.py - Update your product_list view
+
 @login_required
 def product_list(request):
     """Display products with their units of measure"""
-    # Get user locations
     user_locations = get_user_locations(request.user)
     
     # Base queryset with optimizations - include units
@@ -114,18 +119,19 @@ def product_list(request):
         Prefetch('stocks', 
             queryset=ProductStock.objects.filter(location__in=user_locations).select_related('location')
         ),
-        Prefetch('units',  # ADD THIS - Prefetch units
-            queryset=ProductUnit.objects.all()
+        Prefetch('units',
+            queryset=ProductUnit.objects.all().order_by('quantity_in_base')
         )
     ).distinct()
     
-    # Handle search
+    # Handle search - REMOVE 'barcode' since it doesn't exist
     search_query = request.GET.get('q', '')
     if search_query:
         products = products.filter(
             Q(name__icontains=search_query) |
             Q(sku__icontains=search_query) |
             Q(category__name__icontains=search_query)
+            # REMOVED: Q(barcode__icontains=search_query)  # This field doesn't exist
         )
     
     # Handle category filter
@@ -151,7 +157,7 @@ def product_list(request):
     out_of_stock_count = 0
     
     for product in page_obj:
-        stocks = product.stocks.all()  # Already prefetched
+        stocks = product.stocks.all()
         total_stock = sum(stock.quantity for stock in stocks)
         
         if total_stock == 0:
@@ -159,10 +165,14 @@ def product_list(request):
         elif total_stock <= product.reorder_level:
             low_stock_count += 1
         
+        units = product.units.all()
+        
         product_data.append({
             'product': product,
             'stocks': stocks,
-            'total_stock': total_stock
+            'total_stock': total_stock,
+            'units': units,
+            'default_unit': units.filter(is_default=True).first() or (units.first() if units.exists() else None)
         })
     
     context = {
@@ -174,9 +184,135 @@ def product_list(request):
         'out_of_stock_count': out_of_stock_count,
         'page_obj': page_obj,
         'sort_by': sort_by,
+        'user_locations': user_locations,
     }
     return render(request, 'inventory/product_list.html', context)
 
+
+@login_required
+@require_GET
+def search_products_live(request):
+    """Live search API endpoint for products"""
+    query = request.GET.get('q', '').strip()
+    location_id = request.GET.get('location_id')
+    
+    if len(query) < 2:
+        return JsonResponse({'results': [], 'more': False})
+    
+    # Search products
+    products = Product.objects.filter(
+        Q(name__icontains=query) |
+        Q(sku__icontains=query) |
+        Q(barcode__icontains=query)
+    ).select_related('category').prefetch_related('units')[:20]
+    
+    results = []
+    for product in products:
+        # Get stock quantity for the selected location
+        stock_quantity = 0
+        if location_id:
+            try:
+                stock = ProductStock.objects.get(product=product, location_id=location_id)
+                stock_quantity = stock.quantity
+            except ProductStock.DoesNotExist:
+                pass
+        
+        # Get available units
+        units_data = []
+        for unit in product.units.all():
+            units_data.append({
+                'id': unit.id,
+                'name': unit.unit_name,
+                'selling_price': float(unit.selling_price),
+                'quantity_in_base': float(unit.quantity_in_base),
+                'is_default': unit.is_default
+            })
+        
+        # If no units defined, add base product as unit
+        if not units_data:
+            units_data.append({
+                'id': None,
+                'name': product.base_unit or 'piece',
+                'selling_price': float(product.selling_price),
+                'quantity_in_base': 1,
+                'is_default': True
+            })
+        
+        results.append({
+            'id': product.id,
+            'name': product.name,
+            'sku': product.sku,
+            'barcode': product.barcode or '',
+            'category': product.category.name if product.category else 'Uncategorized',
+            'selling_price': float(product.selling_price),
+            'cost_price': float(product.cost_price),
+            'base_unit': product.base_unit or 'piece',
+            'stock_quantity': stock_quantity,
+            'reorder_level': product.reorder_level,
+            'units': units_data,
+            'image_url': product.image.url if product.image else None,
+        })
+    
+    return JsonResponse({
+        'results': results,
+        'count': len(results),
+        'more': len(results) >= 20
+    })
+
+
+@login_required
+@require_GET
+def calculate_unit_price(request):
+    """Calculate price when switching between units"""
+    product_id = request.GET.get('product_id')
+    unit_name = request.GET.get('unit_name')
+    quantity = request.GET.get('quantity', 1)
+    
+    try:
+        quantity = int(float(quantity))
+        if quantity < 1:
+            quantity = 1
+    except (ValueError, TypeError):
+        quantity = 1
+    
+    try:
+        product = Product.objects.get(id=product_id)
+        
+        # Try to find the unit
+        try:
+            unit = product.units.get(unit_name=unit_name)
+            unit_price = unit.selling_price
+            total_price = unit_price * quantity
+            quantity_in_base = unit.quantity_in_base * quantity
+            
+            return JsonResponse({
+                'success': True,
+                'unit_price': float(unit_price),
+                'total_price': float(total_price),
+                'quantity_in_base': float(quantity_in_base),
+                'unit_name': unit.unit_name,
+                'base_unit': product.base_unit,
+                'is_default_unit': unit.is_default
+            })
+        except ProductUnit.DoesNotExist:
+            # Use base product price
+            unit_price = product.selling_price
+            total_price = unit_price * quantity
+            
+            return JsonResponse({
+                'success': True,
+                'unit_price': float(unit_price),
+                'total_price': float(total_price),
+                'quantity_in_base': float(quantity),
+                'unit_name': product.base_unit or 'piece',
+                'base_unit': product.base_unit,
+                'is_default_unit': True
+            })
+            
+    except Product.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Product not found'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
 
 @login_required
 def product_detail(request, product_id):
@@ -379,9 +515,34 @@ def product_edit(request, pk):
                 name = request.POST.get('name', '').strip()
                 category_id = request.POST.get('category')
                 base_unit = request.POST.get('base_unit', product.base_unit)
-                cost_price = request.POST.get('cost_price', '0')
-                selling_price = request.POST.get('selling_price', '0')
+                sku = request.POST.get('sku', product.sku)
                 reorder_level = request.POST.get('reorder_level', product.reorder_level)
+                
+                # Handle numeric fields
+                try:
+                    reorder_level = int(reorder_level) if reorder_level else 0
+                except (ValueError, TypeError):
+                    reorder_level = product.reorder_level
+                
+                # Handle cost price - ONLY update if provided
+                cost_price_str = request.POST.get('cost_price', '')
+                if cost_price_str and cost_price_str != '':
+                    try:
+                        cost_price = float(cost_price_str)
+                    except (ValueError, TypeError):
+                        cost_price = product.cost_price
+                else:
+                    cost_price = product.cost_price
+                
+                # Handle selling price - ONLY update if provided
+                selling_price_str = request.POST.get('selling_price', '')
+                if selling_price_str and selling_price_str != '':
+                    try:
+                        selling_price = float(selling_price_str)
+                    except (ValueError, TypeError):
+                        selling_price = product.selling_price
+                else:
+                    selling_price = product.selling_price
                 
                 if not name:
                     messages.error(request, "Product name is required")
@@ -397,84 +558,124 @@ def product_edit(request, pk):
                     messages.error(request, "Invalid category selected")
                     return redirect('inventory:product_edit', pk=pk)
                 
-                try:
-                    cost_price = float(cost_price) if cost_price else 0.0
-                    selling_price = float(selling_price) if selling_price else 0.0
-                    reorder_level = int(reorder_level) if reorder_level else 10
-                except (ValueError, TypeError):
-                    messages.error(request, "Please enter valid numeric values")
-                    return redirect('inventory:product_edit', pk=pk)
-                
-                # Update product
+                # Update product basic info
                 product.name = name
                 product.category = category
                 product.base_unit = base_unit
+                product.sku = sku
                 product.cost_price = cost_price
                 product.selling_price = selling_price
                 product.reorder_level = reorder_level
                 product.save()
                 
-                # Update stock quantities
+                # ============================================
+                # UPDATE STOCK QUANTITIES (Like Purchase Add)
+                # ============================================
                 for location in user_locations:
                     quantity_key = f'quantity_{location.id}'
                     quantity_str = request.POST.get(quantity_key, '')
                     
-                    try:
-                        quantity = int(quantity_str) if quantity_str else current_stocks.get(location.id, 0)
-                        quantity = max(0, quantity)
-                    except (ValueError, TypeError):
+                    if quantity_str and quantity_str != '':
+                        try:
+                            quantity = float(quantity_str)
+                            quantity = max(0, quantity)
+                        except (ValueError, TypeError):
+                            quantity = current_stocks.get(location.id, 0)
+                    else:
                         quantity = current_stocks.get(location.id, 0)
                     
+                    # Get or create stock record
                     stock, created = ProductStock.objects.get_or_create(
                         product=product,
                         location=location,
                         defaults={'quantity': quantity}
                     )
                     
+                    # Update quantity if changed
                     if not created and stock.quantity != quantity:
                         stock.quantity = quantity
                         stock.save()
                 
+                # ============================================
                 # UPDATE UNITS OF MEASURE
-                # Get all unit data from form
+                # ============================================
                 unit_ids = request.POST.getlist('unit_id[]')
                 unit_names = request.POST.getlist('unit_name[]')
                 unit_quantities = request.POST.getlist('unit_quantity[]')
                 unit_prices = request.POST.getlist('unit_price[]')
                 unit_defaults = request.POST.getlist('unit_default[]')
                 
-                # Get existing unit IDs to keep
+                # Get existing units
+                existing_units = {unit.id: unit for unit in product.units.all()}
                 keep_unit_ids = []
                 
                 for i in range(len(unit_names)):
-                    if unit_names[i] and unit_quantities[i] and unit_prices[i]:
-                        unit_id = unit_ids[i] if i < len(unit_ids) and unit_ids[i] else None
-                        
-                        if unit_id and unit_id != '':
-                            # Update existing unit
-                            try:
-                                unit = ProductUnit.objects.get(id=unit_id, product=product)
-                                unit.unit_name = unit_names[i].lower()
-                                unit.quantity_in_base = float(unit_quantities[i])
-                                unit.selling_price = float(unit_prices[i])
-                                unit.is_default = str(unit_ids[i]) in unit_defaults if unit_ids[i] else False
+                    if not unit_names[i] or not unit_quantities[i]:
+                        continue
+                    
+                    unit_name = unit_names[i].strip().lower()
+                    
+                    # Convert quantity to integer
+                    try:
+                        qty = float(unit_quantities[i])
+                        if qty == int(qty):
+                            qty = int(qty)
+                    except (ValueError, TypeError):
+                        qty = 1
+                    
+                    # Handle unit price
+                    unit_price_str = unit_prices[i] if i < len(unit_prices) else ''
+                    unit_id_str = unit_ids[i] if i < len(unit_ids) and unit_ids[i] else None
+                    
+                    # Check if this unit should be default
+                    is_default = False
+                    if unit_id_str and str(unit_id_str) in unit_defaults:
+                        is_default = True
+                    elif f"new_{i}" in unit_defaults:
+                        is_default = True
+                    
+                    if unit_id_str and unit_id_str != '' and unit_id_str != 'None':
+                        # Update existing unit
+                        try:
+                            unit_id = int(unit_id_str)
+                            if unit_id in existing_units:
+                                unit = existing_units[unit_id]
+                                unit.unit_name = unit_name
+                                unit.quantity_in_base = qty
+                                
+                                if unit_price_str and unit_price_str != '':
+                                    try:
+                                        unit.selling_price = float(unit_price_str)
+                                    except (ValueError, TypeError):
+                                        pass
+                                
+                                unit.is_default = is_default
                                 unit.save()
                                 keep_unit_ids.append(unit.id)
-                            except ProductUnit.DoesNotExist:
-                                pass
-                        else:
-                            # Create new unit
-                            new_unit = ProductUnit.objects.create(
-                                product=product,
-                                unit_name=unit_names[i].lower(),
-                                quantity_in_base=float(unit_quantities[i]),
-                                selling_price=float(unit_prices[i]),
-                                is_default=False
-                            )
-                            keep_unit_ids.append(new_unit.id)
+                        except (ValueError, TypeError):
+                            pass
+                    else:
+                        # Create new unit
+                        new_price = 0
+                        if unit_price_str and unit_price_str != '':
+                            try:
+                                new_price = float(unit_price_str)
+                            except (ValueError, TypeError):
+                                new_price = 0
+                        
+                        new_unit = ProductUnit.objects.create(
+                            product=product,
+                            unit_name=unit_name,
+                            quantity_in_base=qty,
+                            selling_price=new_price,
+                            is_default=is_default
+                        )
+                        keep_unit_ids.append(new_unit.id)
                 
                 # Delete units that were removed
-                ProductUnit.objects.filter(product=product).exclude(id__in=keep_unit_ids).delete()
+                for unit_id, unit in existing_units.items():
+                    if unit_id not in keep_unit_ids:
+                        unit.delete()
                 
                 # Ensure at least one default unit exists
                 if not ProductUnit.objects.filter(product=product, is_default=True).exists():
@@ -483,7 +684,8 @@ def product_edit(request, pk):
                         first_unit.is_default = True
                         first_unit.save()
                 
-                messages.success(request, f"Product '{name}' updated successfully with {ProductUnit.objects.filter(product=product).count()} units!")
+                unit_count = ProductUnit.objects.filter(product=product).count()
+                messages.success(request, f"Product '{name}' updated successfully with {unit_count} units!")
                 return redirect('inventory:product_list')
                 
             except Exception as e:
@@ -493,7 +695,7 @@ def product_edit(request, pk):
                     'categories': categories,
                     'locations': user_locations,
                     'stocks': current_stocks,
-                    'units': product.units.all(),  # Pass units to template
+                    'units': product.units.all(),
                 }
                 return render(request, 'inventory/product_edit.html', context)
         
@@ -504,7 +706,7 @@ def product_edit(request, pk):
                 'categories': categories,
                 'locations': user_locations,
                 'stocks': current_stocks,
-                'units': product.units.all(),  # IMPORTANT: Pass units to template
+                'units': product.units.all().order_by('quantity_in_base'),
             }
             return render(request, 'inventory/product_edit.html', context)
             
@@ -514,7 +716,6 @@ def product_edit(request, pk):
     except Exception as e:
         messages.error(request, f"Error loading product: {str(e)}")
         return redirect('inventory:product_list')
-
 
 @login_required
 @transaction.atomic
@@ -1886,10 +2087,14 @@ def transfer_detail(request, batch_id):
 # =======================
 # STOCK REPORT
 # =======================
+
 @login_required
 def stock_report(request):
-    # Get all products with related data
-    products = Product.objects.all().select_related('category').prefetch_related('stocks')
+    # Get all products with related data including units
+    products = Product.objects.all().select_related('category').prefetch_related(
+        'stocks',
+        'units'  # Add this to prefetch units
+    )
     
     # Get filter parameters
     search_query = request.GET.get('q', '')
@@ -1925,7 +2130,7 @@ def stock_report(request):
         
         # Apply status filter
         if status_filter:
-            if status_filter == 'low' and not (total_stock == 0 or total_stock <= product.reorder_level):
+            if status_filter == 'low' and not (total_stock > 0 and total_stock <= product.reorder_level):
                 continue
             elif status_filter == 'out' and total_stock != 0:
                 continue
@@ -1948,11 +2153,27 @@ def stock_report(request):
         else:
             in_stock_count += 1
         
+        # Prepare unit information
+        units_info = []
+        for unit in product.units.all().order_by('quantity_in_base'):
+            # Calculate stock in this unit
+            stock_in_unit = total_stock / float(unit.quantity_in_base) if unit.quantity_in_base else 0
+            units_info.append({
+                'name': unit.unit_name,
+                'quantity_in_base': float(unit.quantity_in_base),
+                'selling_price': float(unit.selling_price),
+                'stock_in_unit': stock_in_unit,
+                'is_default': unit.is_default,
+                'stock_display': f"{stock_in_unit:.1f}" if stock_in_unit < 1 else f"{int(stock_in_unit)}"
+            })
+        
         product_data.append({
             'product': product,
             'total_stock': total_stock,
             'stock_value': stock_value,
-            'stocks': stocks
+            'stocks': stocks,
+            'units': units_info,
+            'has_units': len(units_info) > 0
         })
     
     # Prepare summary
@@ -1974,10 +2195,11 @@ def stock_report(request):
         'locations': locations,
         'summary': summary,
         'search_query': search_query,
+        'category_filter': category_filter,
+        'status_filter': status_filter,
+        'location_filter': location_filter,
     }
     return render(request, 'inventory/stock_report.html', context)
-
-
 # =======================
 # # =======================
 # CSV EXPORT/IMPORT WITH UNITS
