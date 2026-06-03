@@ -641,6 +641,16 @@
                 <i class="fas fa-warehouse me-2"></i>Tusakimu Enterprises
             </a>
 
+{% if request.user.is_superuser %}
+<li class="nav-item">
+    <a class="nav-link"
+       href="{% url 'inventory:bulk_product_edit' %}">
+        <i class="fas fa-edit"></i>
+        Bulk Product Manager
+    </a>
+</li>
+{% endif %}
+
             <!-- Mobile Toggle -->
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
