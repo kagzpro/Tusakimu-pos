@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Bulk Product Manager{% endblock %}
+
+{% block content %}
+
+<div class="container-fluid mt-4">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3>
+            <i class="fas fa-edit"></i>
+            Bulk Product Manager
+        </h3>
+        <div>
+            <button class="btn btn-info" id="refreshBtn">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back
+            </a>
+        </div>
+    </div>
+
+    <div class="card">
+
+        <div class="card-header">
+            <div class="row">
+                <div class="col-md-4">
+                    <input
+                        type="text"
+                        id="searchBox"
+                        class="form-control"
+                        placeholder="Search product by name or SKU..."
+                    >
+                </div>
+                <div class="col-md-3">
+                    <select id="categoryFilter" class="form-select">
+                        <option value="">All Categories</option>
+                        {% for category in categories %}
+                        <option value="{{ category.id }}">{{ category.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select id="locationFilter" class="form-select">
+                        <option value="">All Locations</option>
+                        {% for location in locations %}
+                        <option value="{{ location.id }}">{{ location.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2 text-end">
+                    <span class="badge bg-info" id="rowCount">0</span> products
+                </div>
+            </div>
+        </div>
+
+        <div class="card-body p-0">
+
+            <div class="table-responsive">
+
+                <table class="table table-bordered table-hover mb-0" id="bulkTable">
+
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 15%">Product</th>
+                            <th style="width: 8%">SKU</th>
+                            <th style="width: 10%">Category</th>
+                            <th style="width: 15%">Unit</th>
+                            <th style="width: 10%">Sale Price (UGX)</th>
+                            <th style="width: 15%">Stock Qty</th>
+                            <th style="width: 10%">Unit Stock</th>
+                            <th style="width: 7%">Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="productTable">
+                    {% for product in products %}
+                        {% for unit in product.units.all %}
+                        <tr class="product-row" data-product-id="{{ product.id }}" data-unit-id="{{ unit.id }}" data-conversion="{{ unit.quantity_in_base }}">
+                            <td>
+                                <strong>{{ product.name }}</strong>
+                                <br>
+                                <small class="text-muted">Base: {{ product.base_unit|default:"piece" }}</small>
+                            </td>
+                            <td><code>{{ product.sku|default:"-" }}</code></td>
+                            <td>{{ product.category.name|default:"-" }}</td>
+                            <td>
+                                <select class="form-select form-select-sm unit-selector" data-product-id="{{ product.id }}">
+                                    {% for u in product.units.all %}
+                                    <option value="{{ u.id }}" 
+                                            data-unit-name="{{ u.unit_name }}"
+                                            data-conversion="{{ u.quantity_in_base }}"
+                                            data-sale-price="{{ u.selling_price|floatformat:0 }}"
+                                            {% if unit.id == u.id %}selected{% endif %}>
+                                        {{ u.unit_name|title }}
+                                        (1 = {{ u.quantity_in_base|floatformat:0 }} {{ product.base_unit }}s)
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text">UGX</span>
+                                    <input type="number" class="form-control sale-price-input" 
+                                           value="{{ unit.selling_price|floatformat:0 }}" 
+                                           step="100"
+                                           data-original="{{ unit.selling_price|floatformat:0 }}">
+                                </div>
+                            </td>
+                            <td class="stock-cell">
+                                <div class="stock-input-group">
+                                    {% with stocks=product.stocks.all %}
+                                        {% if stocks %}
+                                            {% for stock in stocks %}
+                                            <div class="input-group input-group-sm mb-1">
+                                                <span class="input-group-text" style="min-width: 100px;">
+                                                    <i class="fas fa-warehouse"></i> {{ stock.location.name }}
+                                                </span>
+                                                <input type="number" class="form-control stock-input" 
+                                                       data-location-id="{{ stock.location.id }}"
+                                                       value="{{ stock.quantity|floatformat:0 }}" 
+                                                       step="1" min="0">
+                                            </div>
+                                            {% endfor %}
+                                        {% else %}
+                                            <div class="text-muted text-center">No stock</div>
+                                        {% endif %}
+                                    {% endwith %}
+                                </div>
+                            </td>
+                            <td class="text-center">
+                                <div>
+                                    <span class="badge unit-stock-badge" id="unit-stock-{{ product.id }}-{{ unit.id }}">
+                                        {% with total=0 %}
+                                            {% for stock in product.stocks.all %}
+                                                {% with total=total|add:stock.quantity %}
+                                                {% endwith %}
+                                            {% endfor %}
+                                            {% widthratio 0 1 unit.quantity_in_base as unit_stock %}
+                                            0
+                                        {% endwith %}
+                                    </span>
+                                </div>
+                                <div class="small text-muted">{{ unit.unit_name }}s</div>
+                                <div class="small text-success">= Base ÷ {{ unit.quantity_in_base }}</div>
+                            </td>
+                            <td class="text-center">
+                                <button class="btn btn-success btn-sm save-row" 
+                                        data-product="{{ product.id }}" 
+                                        data-unit="{{ unit.id }}"
+                                        data-conversion="{{ unit.quantity_in_base }}">
+                                    <i class="fas fa-save"></i> Save
+                                </button>
+                                <div class="small save-feedback" id="feedback-{{ product.id }}-{{ unit.id }}"></div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr class="product-row" data-product-id="{{ product.id }}">
+                            <td><strong>{{ product.name }}</strong></td>
+                            <td><code>{{ product.sku|default:"-" }}</code></td>
+                            <td>{{ product.category.name|default:"-" }}</td>
+                            <td colspan="5" class="text-center text-muted">
+                                <i class="fas fa-exclamation-triangle"></i> No units defined. 
+                                <a href="{% url 'inventory:product_edit' product.id %}">Add units</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.product-row {
+    transition: background-color 0.2s ease;
+}
+.product-row:hover {
+    background-color: #f8f9fa;
+}
+.stock-input-group {
+    min-width: 200px;
+}
+.unit-stock-badge {
+    font-size: 1rem;
+    padding: 5px 12px;
+}
+.unit-stock-badge.bg-success { background: #1cc88a; color: white; }
+.unit-stock-badge.bg-warning { background: #f6c23e; color: #333; }
+.unit-stock-badge.bg-danger { background: #e74a3b; color: white; }
+.save-feedback.success { color: #10b981; font-size: 0.75rem; }
+.save-feedback.error { color: #ef4444; font-size: 0.75rem; }
+.changed {
+    border: 2px solid #ffc107 !important;
+    background-color: #fff3cd !important;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+
+    // ==================== HELPER FUNCTIONS ====================
+    function formatNumber(value) {
+        if (!value && value !== 0) return '0';
+        return parseFloat(value).toLocaleString('en-UG');
+    }
+
+    // Calculate total base stock from all locations
+    function calculateTotalBaseStock(row) {
+        const stockInputs = row.querySelectorAll('.stock-input');
+        let total = 0;
+        stockInputs.forEach(input => {
+            total += parseFloat(input.value) || 0;
+        });
+        return total;
+    }
+
+    // Update unit stock display
+    function updateUnitStock(row) {
+        const unitId = row.dataset.unitId;
+        const productId = row.dataset.productId;
+        const conversion = parseFloat(row.dataset.conversion);
+        const totalBaseStock = calculateTotalBaseStock(row);
+        
+        const unitStock = totalBaseStock / conversion;
+        const displayValue = unitStock >= 1 ? Math.floor(unitStock) : unitStock.toFixed(2);
+        const stockSpan = document.getElementById(`unit-stock-${productId}-${unitId}`);
+        
+        if (stockSpan) {
+            stockSpan.innerHTML = displayValue;
+            if (unitStock <= 0) {
+                stockSpan.className = 'badge unit-stock-badge bg-danger';
+            } else if (unitStock <= 10) {
+                stockSpan.className = 'badge unit-stock-badge bg-warning';
+            } else {
+                stockSpan.className = 'badge unit-stock-badge bg-success';
+            }
+        }
+    }
+
+    // ==================== UNIT SELECTOR CHANGE ====================
+    document.querySelectorAll('.unit-selector').forEach(selector => {
+        selector.addEventListener('change', function() {
+            const row = this.closest('tr');
+            const selectedOption = this.options[this.selectedIndex];
+            const salePrice = parseFloat(selectedOption.dataset.salePrice);
+            const unitName = selectedOption.dataset.unitName;
+            const conversion = parseFloat(selectedOption.dataset.conversion);
+            
+            // Update row data
+            row.dataset.unitId = selectedOption.value;
+            row.dataset.conversion = conversion;
+            
+            // Update sale price input
+            const salePriceInput = row.querySelector('.sale-price-input');
+            if (salePriceInput) {
+                salePriceInput.value = formatNumber(salePrice);
+                salePriceInput.dataset.original = salePrice;
+            }
+            
+            // Update save button data
+            const saveBtn = row.querySelector('.save-row');
+            if (saveBtn) {
+                saveBtn.dataset.unit = selectedOption.value;
+                saveBtn.dataset.conversion = conversion;
+            }
+            
+            // Update unit stock display
+            updateUnitStock(row);
+        });
+    });
+
+    // ==================== TRACK CHANGES ====================
+    // Track sale price changes
+    document.querySelectorAll('.sale-price-input').forEach(input => {
+        input.addEventListener('input', function() {
+            const original = parseFloat(this.dataset.original);
+            const current = parseFloat(this.value);
+            if (current !== original) {
+                this.classList.add('changed');
+            } else {
+                this.classList.remove('changed');
+            }
+        });
+    });
+
+    // Track stock changes
+    document.querySelectorAll('.stock-input').forEach(input => {
+        input.addEventListener('input', function() {
+            const row = this.closest('tr');
+            updateUnitStock(row);
+            
+            // Highlight save button
+            const saveBtn = row.querySelector('.save-row');
+            if (saveBtn && !saveBtn.classList.contains('btn-warning')) {
+                saveBtn.classList.remove('btn-success');
+                saveBtn.classList.add('btn-warning');
+            }
+        });
+    });
+
+    // ==================== SAVE FUNCTIONALITY ====================
+    document.querySelectorAll('.save-row').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const row = this.closest('tr');
+            const productId = this.dataset.product;
+            const unitId = this.dataset.unit;
+            const conversion = parseFloat(this.dataset.conversion);
+            const salePrice = row.querySelector('.sale-price-input').value;
+            const stockInputs = row.querySelectorAll('.stock-input');
+            
+            // Disable button and show saving state
+            this.disabled = true;
+            const originalHtml = this.innerHTML;
+            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            const feedbackDiv = document.getElementById(`feedback-${productId}-${unitId}`);
+            if (feedbackDiv) feedbackDiv.innerHTML = '';
+            
+            try {
+                // 1. Update unit sale price
+                const priceFormData = new FormData();
+                priceFormData.append('product_id', productId);
+                priceFormData.append('unit_id', unitId);
+                priceFormData.append('selling_price', salePrice);
+                
+                const priceResponse = await fetch("{% url 'inventory:bulk_update_product' %}", {
+                    method: "POST",
+                    headers: { "X-CSRFToken": "{{ csrf_token }}" },
+                    body: priceFormData
+                });
+                
+                const priceData = await priceResponse.json();
+                if (!priceData.success) {
+                    throw new Error(priceData.error || 'Failed to update price');
+                }
+                
+                // 2. Update stock for each location
+                let stockErrors = [];
+                for (const stockInput of stockInputs) {
+                    const locationId = stockInput.dataset.locationId;
+                    const stockQty = stockInput.value;
+                    
+                    if (locationId) {
+                        const stockFormData = new FormData();
+                        stockFormData.append('product_id', productId);
+                        stockFormData.append('location_id', locationId);
+                        stockFormData.append('stock_qty', stockQty);
+                        
+                        const stockResponse = await fetch("{% url 'inventory:bulk_update_product' %}", {
+                            method: "POST",
+                            headers: { "X-CSRFToken": "{{ csrf_token }}" },
+                            body: stockFormData
+                        });
+                        
+                        const stockData = await stockResponse.json();
+                        if (!stockData.success) {
+                            stockErrors.push(stockData.error);
+                        }
+                    }
+                }
+                
+                // 3. Update UI to show success
+                if (feedbackDiv) {
+                    feedbackDiv.innerHTML = '<i class="fas fa-check-circle"></i> Saved!';
+                    feedbackDiv.className = 'small save-feedback success';
+                }
+                
+                // Remove highlight from changed fields
+                row.querySelectorAll('.changed').forEach(el => {
+                    el.classList.remove('changed');
+                });
+                
+                // Update original values
+                const salePriceInput = row.querySelector('.sale-price-input');
+                if (salePriceInput) salePriceInput.dataset.original = salePrice;
+                
+                // Update button style
+                this.classList.remove('btn-warning');
+                this.classList.add('btn-success');
+                this.innerHTML = '<i class="fas fa-check"></i> Saved';
+                
+                setTimeout(() => {
+                    this.innerHTML = originalHtml;
+                    this.disabled = false;
+                    if (feedbackDiv) {
+                        setTimeout(() => {
+                            if (feedbackDiv) feedbackDiv.innerHTML = '';
+                        }, 1500);
+                    }
+                }, 2000);
+                
+                if (stockErrors.length > 0) {
+                    console.warn('Stock warnings:', stockErrors);
+                }
+                
+            } catch (error) {
+                if (feedbackDiv) {
+                    feedbackDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${error.message}`;
+                    feedbackDiv.className = 'small save-feedback error';
+                }
+                this.innerHTML = originalHtml;
+                this.disabled = false;
+                setTimeout(() => {
+                    if (feedbackDiv) feedbackDiv.innerHTML = '';
+                }, 3000);
+            }
+        });
+    });
+
+    // ==================== SEARCH & FILTERS ====================
+    const searchBox = document.getElementById('searchBox');
+    const categoryFilter = document.getElementById('categoryFilter');
+    const locationFilter = document.getElementById('locationFilter');
+    const rowCountSpan = document.getElementById('rowCount');
+
+    function filterRows() {
+        const searchTerm = searchBox ? searchBox.value.toLowerCase() : '';
+        const categoryId = categoryFilter ? categoryFilter.value : '';
+        const locationText = locationFilter ? locationFilter.options[locationFilter.selectedIndex]?.text : '';
+        
+        let visibleCount = 0;
+        document.querySelectorAll('#productTable tr').forEach(row => {
+            let show = true;
+            
+            // Search filter
+            if (searchTerm) {
+                const text = row.textContent.toLowerCase();
+                if (!text.includes(searchTerm)) show = false;
+            }
+            
+            // Category filter
+            if (show && categoryId) {
+                const categoryCell = row.querySelector('td:nth-child(3)');
+                if (categoryCell && categoryCell.textContent !== categoryFilter.options[categoryFilter.selectedIndex]?.text) {
+                    show = false;
+                }
+            }
+            
+            // Location filter - show/hide stock columns
+            if (locationFilter && locationFilter.value) {
+                const stockCells = row.querySelectorAll('.stock-input-group .input-group');
+                stockCells.forEach(group => {
+                    const locationSpan = group.querySelector('.input-group-text');
+                    if (locationSpan && !locationSpan.textContent.includes(locationText)) {
+                        group.style.display = 'none';
+                    } else {
+                        group.style.display = 'flex';
+                    }
+                });
+            } else if (locationFilter && !locationFilter.value) {
+                const stockCells = row.querySelectorAll('.stock-input-group .input-group');
+                stockCells.forEach(group => {
+                    group.style.display = 'flex';
+                });
+            }
+            
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+        
+        if (rowCountSpan) rowCountSpan.textContent = visibleCount;
+    }
+
+    if (searchBox) searchBox.addEventListener('keyup', filterRows);
+    if (categoryFilter) categoryFilter.addEventListener('change', filterRows);
+    if (locationFilter) locationFilter.addEventListener('change', filterRows);
+    
+    // Initialize unit stock for all rows
+    document.querySelectorAll('.product-row').forEach(row => {
+        updateUnitStock(row);
+    });
+    
+    filterRows();
+
+    // Refresh button
+    document.getElementById('refreshBtn')?.addEventListener('click', () => window.location.reload());
+});
+</script>
+
+{% endblock %}
