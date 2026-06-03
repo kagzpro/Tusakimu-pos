@@ -1,531 +1,457 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{{ product.name }} - Product Details{% endblock %}
+{% block title %}Products - Tusakimu Enterprises Inventory Management{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
     <!-- Header Section -->
     <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
         <div>
-            <h2 class="mb-1 fw-bold">{{ product.name }}</h2>
+            <h2 class="mb-1 fw-bold">📦 Products</h2>
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb mb-0">
                     <li class="breadcrumb-item"><a href="{% url 'inventory:dashboard' %}">Dashboard</a></li>
-                    <li class="breadcrumb-item"><a href="{% url 'inventory:product_list' %}">Products</a></li>
-                    <li class="breadcrumb-item active">{{ product.name }}</li>
+                    <li class="breadcrumb-item active">Products</li>
                 </ol>
             </nav>
         </div>
         <div class="btn-group">
-            <a href="{% url 'inventory:product_edit' product.id %}" class="btn btn-primary">
-                <i class="fas fa-edit"></i> Edit Product
+            <a href="{% url 'inventory:import_products' %}" class="btn btn-outline-success">
+                <i class="fas fa-file-import"></i> Import
             </a>
-            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary">
-                <i class="fas fa-arrow-left"></i> Back
+            <a href="{% url 'inventory:export_products' %}" class="btn btn-outline-secondary">
+                <i class="fas fa-file-export"></i> Export
+            </a>
+            <a href="{% url 'inventory:product_add' %}" class="btn btn-primary">
+                <i class="fas fa-plus"></i> Add Product
             </a>
         </div>
     </div>
 
-    <div class="row">
-        <!-- Left Column - Product Info -->
-        <div class="col-lg-4 mb-4">
-            <div class="card shadow">
-                <div class="card-header bg-white py-3">
-                    <h5 class="card-title mb-0 fw-bold">
-                        <i class="fas fa-info-circle text-primary me-2"></i>Product Information
-                    </h5>
-                </div>
+    <!-- Statistics Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-primary shadow h-100">
                 <div class="card-body">
-                    <table class="table table-borderless">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Total Products</div>
+                            <div class="h3 mb-0 fw-bold text-gray-800">{{ product_data|length }}</div>
+                        </div>
+                        <div class="rounded-circle bg-primary bg-opacity-10 p-3">
+                            <i class="fas fa-boxes fa-2x text-primary"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-success shadow h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">In Stock</div>
+                            <div class="h3 mb-0 fw-bold text-gray-800" id="inStockCount">0</div>
+                        </div>
+                        <div class="rounded-circle bg-success bg-opacity-10 p-3">
+                            <i class="fas fa-check-circle fa-2x text-success"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-warning shadow h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Low Stock</div>
+                            <div class="h3 mb-0 fw-bold text-gray-800" id="lowStockCount">{{ low_stock_count }}</div>
+                        </div>
+                        <div class="rounded-circle bg-warning bg-opacity-10 p-3">
+                            <i class="fas fa-exclamation-triangle fa-2x text-warning"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-danger shadow h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">Out of Stock</div>
+                            <div class="h3 mb-0 fw-bold text-gray-800" id="outOfStockCount">{{ out_of_stock_count }}</div>
+                        </div>
+                        <div class="rounded-circle bg-danger bg-opacity-10 p-3">
+                            <i class="fas fa-times-circle fa-2x text-danger"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Filter Bar -->
+    <div class="card shadow mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-5">
+                    <div class="input-group">
+                        <span class="input-group-text bg-white"><i class="fas fa-search text-primary"></i></span>
+                        <input type="text" id="searchInput" class="form-control" placeholder="Search by name, SKU, or category..." value="{{ search_query }}">
+                        <button class="btn btn-outline-secondary" id="clearSearchBtn" type="button" style="display: {% if search_query %}block{% else %}none{% endif %}">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <select id="categoryFilter" class="form-select">
+                        <option value="">All Categories</option>
+                        {% for category in categories %}
+                        <option value="{{ category.id }}" {% if category_filter == category.id|stringformat:"i" %}selected{% endif %}>
+                            {{ category.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select id="sortBy" class="form-select">
+                        <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name (A-Z)</option>
+                        <option value="-name" {% if sort_by == '-name' %}selected{% endif %}>Name (Z-A)</option>
+                        <option value="sku" {% if sort_by == 'sku' %}selected{% endif %}>SKU</option>
+                        <option value="category__name" {% if sort_by == 'category__name' %}selected{% endif %}>Category</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-primary w-100" id="applyFiltersBtn">
+                        <i class="fas fa-filter"></i> Apply
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Products Table -->
+    <div class="card shadow">
+        <div class="card-header bg-white py-3">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="card-title mb-0 fw-bold">
+                    <i class="fas fa-list text-primary me-2"></i>Products List
+                    {% if search_query or category_filter %}
+                    <span class="badge bg-secondary ms-2">Filtered</span>
+                    {% endif %}
+                </h5>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-info" id="refreshStockBtn">
+                        <i class="fas fa-sync-alt"></i> Refresh Stock
+                    </button>
+                    <button class="btn btn-sm btn-outline-success" id="exportTableBtn">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            {% if product_data %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0" id="productsTable">
+                    <thead class="table-light">
                         <tr>
-                            <td class="text-muted" style="width: 40%">SKU:</td>
-                            <td class="fw-bold">{{ product.sku|default:"-" }}</td>
+                            <th style="width: 5%">#</th>
+                            <th style="width: 20%">Product</th>
+                            <th style="width: 8%">SKU</th>
+                            <th style="width: 10%">Category</th>
+                            <th style="width: 15%">Unit</th>
+                            <th style="width: 12%">Price (UGX)</th>
+                            <th style="width: 10%">Stock</th>
+                            <th style="width: 10%">Unit Stock</th>
+                            <th style="width: 5%">Status</th>
+                            <th style="width: 5%">Actions</th>
                         </tr>
-                        <tr>
-                            <td class="text-muted">Category:</td>
+                    </thead>
+                    <tbody>
+                        {% for item in product_data %}
+                        <tr class="product-row" 
+                            data-product-id="{{ item.product.id }}" 
+                            data-base-unit="{{ item.product.base_unit|default:'piece' }}"
+                            data-base-stock="{{ item.total_stock|floatformat:0 }}">
+                            
+                            <td class="text-center">{{ forloop.counter }}</td>
+                            
+                            <!-- Product Name -->
+                            <td class="product-cell">
+                                <div class="d-flex align-items-center">
+                                    <div class="product-icon me-3">
+                                        <i class="fas fa-box text-primary fa-lg"></i>
+                                    </div>
+                                    <div>
+                                        <a href="{% url 'inventory:product_detail' item.product.id %}" class="fw-bold text-decoration-none text-dark">
+                                            {{ item.product.name }}
+                                        </a>
+                                        <div class="small text-muted">
+                                            Base: <strong>{{ item.product.base_unit|default:"piece" }}</strong>
+                                        </div>
+                                        {% if item.product.reorder_level and item.total_stock <= item.product.reorder_level %}
+                                        <div class="small text-warning mt-1">
+                                            <i class="fas fa-exclamation-triangle"></i> Reorder at {{ item.product.reorder_level }}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </td>
+                            
+                            <!-- SKU -->
+                            <td><code class="sku-badge">{{ item.product.sku|default:"-" }}</code></td>
+                            
+                            <!-- Category -->
                             <td>
-                                {% if product.category %}
-                                <span class="category-badge">{{ product.category.name }}</span>
+                                {% if item.product.category %}
+                                <span class="category-badge">{{ item.product.category.name }}</span>
                                 {% else %}
                                 <span class="text-muted">-</span>
                                 {% endif %}
                             </td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Base Unit:</td>
-                            <td><strong>{{ product.base_unit|default:"piece" }}</strong></td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Cost Price:</td>
-                            <td class="fw-bold text-info">UGX {{ product.cost_price|floatformat:0|default:"0" }}</td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Selling Price:</td>
-                            <td class="fw-bold text-success">UGX {{ product.selling_price|floatformat:0|default:"0" }}</td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Reorder Level:</td>
-                            <td>
-                                <span class="badge {% if current_stock <= product.reorder_level %}bg-warning{% else %}bg-secondary{% endif %}">
-                                    {{ product.reorder_level|default:"0" }} {{ product.base_unit }}s
-                                </span>
+                            
+                            <!-- Unit Selector -->
+                            <td class="unit-cell">
+                                <select class="form-select form-select-sm unit-selector" 
+                                        data-product-id="{{ item.product.id }}"
+                                        data-base-unit="{{ item.product.base_unit|default:'piece' }}">
+                                    {% for unit in item.units %}
+                                    <option value="{{ unit.id }}" 
+                                            data-unit-name="{{ unit.unit_name }}"
+                                            data-conversion="{{ unit.quantity_in_base|default:1 }}"
+                                            data-price="{{ unit.selling_price|floatformat:0|default:item.product.selling_price|floatformat:0 }}"
+                                            data-is-base="{% if unit.unit_name|lower == item.product.base_unit|lower %}true{% else %}false{% endif %}"
+                                            {% if forloop.first %}selected{% endif %}>
+                                        {{ unit.unit_name|title }}
+                                        {% if unit.unit_name|lower == item.product.base_unit|lower %}
+                                            (Base)
+                                        {% else %}
+                                            (1 = {{ unit.quantity_in_base|default:1|floatformat:0 }})
+                                        {% endif %}
+                                    </option>
+                                    {% empty %}
+                                    <option value="" data-unit-name="{{ item.product.base_unit }}" data-conversion="1" data-price="{{ item.product.selling_price|floatformat:0 }}" data-is-base="true" selected>
+                                        {{ item.product.base_unit|title }} (Base)
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <div class="conversion-hint small text-muted mt-1" id="conv-{{ item.product.id }}">
+                                    {% with first_unit=item.units|first %}
+                                        {% if first_unit %}
+                                            {% if first_unit.unit_name|lower == item.product.base_unit|lower %}
+                                                1 {{ first_unit.unit_name }} = 1 {{ item.product.base_unit }}
+                                            {% else %}
+                                                1 {{ first_unit.unit_name }} = {{ first_unit.quantity_in_base|default:1|floatformat:0 }} {{ item.product.base_unit }}
+                                            {% endif %}
+                                        {% else %}
+                                            1 {{ item.product.base_unit }} = 1 {{ item.product.base_unit }}
+                                        {% endif %}
+                                    {% endwith %}
+                                </div>
                             </td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Total Stock:</td>
-                            <td>
-                                <span class="stock-badge">
-                                    {{ current_stock|floatformat:0 }} {{ product.base_unit }}s
+                            
+                            <!-- Price -->
+                            <td class="text-end price-cell">
+                                <span class="price-amount" id="price-{{ item.product.id }}">
+                                    UGX {{ item.product.selling_price|floatformat:0|default:"0" }}
                                 </span>
+                                <div class="small text-muted price-unit-label">
+                                    /{{ item.product.base_unit|default:"unit" }}
+                                </div>
                             </td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Total Purchased:</td>
-                            <td class="text-info">{{ total_purchased|floatformat:0 }} {{ product.base_unit }}s</td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Total Sold:</td>
-                            <td class="text-warning">{{ total_sold|floatformat:0 }} {{ product.base_unit }}s</td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Status:</td>
-                            <td>
-                                {% if current_stock == 0 %}
+                            
+                            <!-- Stock -->
+                            <td class="text-center stock-cell">
+                                <div class="stock-value-wrapper">
+                                    <span class="stock-badge stock-value" id="stock-{{ item.product.id }}">
+                                        {{ item.total_stock|floatformat:0 }}
+                                    </span>
+                                    <div class="small text-muted">{{ item.product.base_unit }}s</div>
+                                </div>
+                            </td>
+                            
+                            <!-- Unit Stock -->
+                            <td class="text-center unit-stock-cell">
+                                <div class="unit-stock-wrapper">
+                                    <span class="unit-stock-badge unit-stock-value 
+                                        {% if item.total_stock == 0 %}bg-danger
+                                        {% elif item.total_stock <= item.product.reorder_level %}bg-warning
+                                        {% else %}bg-success{% endif %}" 
+                                        id="unit-stock-{{ item.product.id }}">
+                                        {% with first_unit=item.units|first %}
+                                            {% if first_unit %}
+                                                {% if first_unit.unit_name|lower == item.product.base_unit|lower %}
+                                                    {{ item.total_stock|floatformat:0 }}
+                                                {% else %}
+                                                    {% widthratio item.total_stock 1 first_unit.quantity_in_base|default:1 as converted %}
+                                                    {{ converted|floatformat:0 }}
+                                                {% endif %}
+                                            {% else %}
+                                                {{ item.total_stock|floatformat:0 }}
+                                            {% endif %}
+                                        {% endwith %}
+                                    </span>
+                                    <div class="small text-muted unit-stock-label" id="unit-label-{{ item.product.id }}">
+                                        {% with first_unit=item.units|first %}
+                                            {% if first_unit %}
+                                                {{ first_unit.unit_name }}s
+                                            {% else %}
+                                                {{ item.product.base_unit }}s
+                                            {% endif %}
+                                        {% endwith %}
+                                    </div>
+                                </div>
+                            </td>
+                            
+                            <!-- Status -->
+                            <td class="text-center">
+                                {% if item.total_stock == 0 %}
                                 <span class="status-badge status-out">Out of Stock</span>
-                                {% elif current_stock <= product.reorder_level %}
+                                {% elif item.total_stock <= item.product.reorder_level %}
                                 <span class="status-badge status-low">Low Stock</span>
                                 {% else %}
                                 <span class="status-badge status-in">In Stock</span>
                                 {% endif %}
                             </td>
-                        </tr>
+                            
+                            <!-- Actions -->
+                            <td class="text-center">
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{% url 'inventory:product_edit' item.product.id %}" class="btn btn-outline-primary" title="Edit">
+                                        <i class="fas fa-edit"></i>
+                                    </a>
+                                    <a href="{% url 'inventory:product_detail' item.product.id %}" class="btn btn-outline-info" title="View">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <button type="button" class="btn btn-outline-danger delete-product" data-product-id="{{ item.product.id }}" data-product-name="{{ item.product.name }}" title="Delete">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
                         <tr>
-                            <td class="text-muted">Created:</td>
-                            <td class="small text-muted">{{ product.created_at|date:"M d, Y H:i" }}</td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">Last Updated:</td>
-                            <td class="small text-muted">{{ product.updated_at|date:"M d, Y H:i" }}</td>
-                        </tr>
-                    </table>
-                </div>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-
-            <!-- Stock Summary Card -->
-            <div class="card shadow mt-4">
-                <div class="card-header bg-white py-3">
-                    <h5 class="card-title mb-0 fw-bold">
-                        <i class="fas fa-chart-pie text-primary me-2"></i>Stock Summary
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="text-center">
-                        <div class="mb-3">
-                            <div class="progress" style="height: 20px;">
-                                {% if total_purchased > 0 %}
-                                {% with sold_percent=total_sold|floatformat:0|add:0 %}
-                                {% with purchased_percent=total_purchased|floatformat:0|add:0 %}
-                                <div class="progress-bar bg-success" style="width: {% widthratio current_stock total_purchased 100 %}%">
-                                    Current Stock
-                                </div>
-                                <div class="progress-bar bg-warning" style="width: {% widthratio total_sold total_purchased 100 %}%">
-                                    Sold
-                                </div>
-                                {% endwith %}
-                                {% endwith %}
-                                {% endif %}
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-6">
-                                <div class="border rounded p-2">
-                                    <div class="small text-muted">Current</div>
-                                    <strong class="text-success">{{ current_stock|floatformat:0 }}</strong>
-                                </div>
-                            </div>
-                            <div class="col-6">
-                                <div class="border rounded p-2">
-                                    <div class="small text-muted">Sold</div>
-                                    <strong class="text-warning">{{ total_sold|floatformat:0 }}</strong>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Right Column - Units of Measure -->
-        <div class="col-lg-8 mb-4">
-            <!-- Units of Measure Card -->
-            <div class="card shadow mb-4">
-                <div class="card-header bg-white py-3">
-                    <h5 class="card-title mb-0 fw-bold">
-                        <i class="fas fa-balance-scale text-primary me-2"></i>Units of Measure
-                    </h5>
-                </div>
-                <div class="card-body">
-                    {% if product.units.all %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Unit Name</th>
-                                    <th>Conversion</th>
-                                    <th>Cost Price (UGX)</th>
-                                    <th>Selling Price (UGX)</th>
-                                    <th>Stock in Unit</th>
-                                    <th>Default</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for unit in product.units.all %}
-                                <tr class="unit-row" data-unit-id="{{ unit.id }}">
-                                    <td>
-                                        <div class="d-flex align-items-center">
-                                            <div class="unit-icon me-2">
-                                                <i class="fas fa-cube text-primary"></i>
-                                            </div>
-                                            <strong class="unit-name">{{ unit.unit_name|title }}</strong>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="conversion-badge">
-                                            1 {{ unit.unit_name }} = {{ unit.quantity_in_base|floatformat:0 }} {{ product.base_unit }}s
-                                        </span>
-                                    </td>
-                                    <td class="text-end">
-                                        <span class="cost-price">UGX {% widthratio product.cost_price 1 unit.quantity_in_base %}</span>
-                                    </td>
-                                    <td class="text-end">
-                                        <span class="selling-price fw-bold text-success">UGX {{ unit.selling_price|floatformat:0|default:"0" }}</span>
-                                    </td>
-                                    <td class="text-center">
-                                        {% with unit_stock=current_stock|floatformat:0|add:0 %}
-                                        <span class="unit-stock-badge 
-                                            {% if unit_stock <= 0 %}bg-danger
-                                            {% elif unit_stock <= product.reorder_level %}bg-warning
-                                            {% else %}bg-success{% endif %}"
-                                            data-conversion="{{ unit.quantity_in_base }}">
-                                            {% widthratio current_stock 1 unit.quantity_in_base as converted %}
-                                            {% if converted >= 1 %}
-                                                {{ converted|floatformat:0 }}
-                                            {% else %}
-                                                {{ converted|floatformat:2 }}
-                                            {% endif %}
-                                        </span>
-                                        <div class="small text-muted">{{ unit.unit_name }}s</div>
-                                        {% endwith %}
-                                    </td>
-                                    <td class="text-center">
-                                        {% if unit.is_default %}
-                                        <i class="fas fa-check-circle text-success fa-lg"></i>
-                                        <div class="small text-success">Default</div>
-                                        {% else %}
-                                        <i class="far fa-circle text-muted"></i>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- Conversion Summary -->
-                    <div class="alert alert-info mt-3">
-                        <div class="d-flex align-items-center">
-                            <i class="fas fa-lightbulb fa-2x me-3"></i>
-                            <div>
-                                <strong>Conversion Summary:</strong><br>
-                                Base Unit: <strong>1 {{ product.base_unit }}</strong><br>
-                                {% for unit in product.units.all %}
-                                    {% if unit.quantity_in_base != 1 %}
-                                        1 <strong>{{ unit.unit_name }}</strong> = <strong>{{ unit.quantity_in_base|floatformat:0 }}</strong> {{ product.base_unit }}s<br>
-                                    {% endif %}
-                                {% endfor %}
-                            </div>
-                        </div>
-                    </div>
+            {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-box-open fa-4x text-muted mb-3"></i>
+                <h5 class="text-muted">No products found</h5>
+                <p class="text-muted mb-4">
+                    {% if search_query or category_filter %}
+                    Try adjusting your search criteria
                     {% else %}
-                    <div class="text-center py-4">
-                        <i class="fas fa-cubes fa-3x text-muted mb-3"></i>
-                        <p class="text-muted">No units defined for this product.</p>
-                        <a href="{% url 'inventory:product_edit' product.id %}" class="btn btn-sm btn-primary">
-                            <i class="fas fa-plus"></i> Add Units
-                        </a>
-                    </div>
+                    Start by adding your first product
                     {% endif %}
-                </div>
-            </div>
-
-            <!-- Stock by Location Card -->
-            <div class="card shadow mb-4">
-                <div class="card-header bg-white py-3">
-                    <h5 class="card-title mb-0 fw-bold">
-                        <i class="fas fa-map-marker-alt text-primary me-2"></i>Stock by Location
-                    </h5>
-                </div>
-                <div class="card-body">
-                    {% if stocks %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Location</th>
-                                    <th>Stock ({{ product.base_unit }}s)</th>
-                                    <th>Status</th>
-                                    <th>Last Updated</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for stock in stocks %}
-                                <tr>
-                                    <td>
-                                        <div class="d-flex align-items-center">
-                                            <i class="fas fa-warehouse text-primary me-2"></i>
-                                            {{ stock.location.name }}
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="stock-location-badge">
-                                            {{ stock.quantity|floatformat:0 }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        {% if stock.quantity == 0 %}
-                                        <span class="status-badge status-out">Out of Stock</span>
-                                        {% elif stock.quantity <= product.reorder_level %}
-                                        <span class="status-badge status-low">Low Stock</span>
-                                        {% else %}
-                                        <span class="status-badge status-in">In Stock</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="small text-muted">
-                                        {{ stock.updated_at|date:"M d, Y H:i"|default:"-" }}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <div class="text-center py-4">
-                        <i class="fas fa-box-open fa-3x text-muted mb-3"></i>
-                        <p class="text-muted">No stock records found for this product.</p>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-
-            <!-- Price Comparison -->
-            {% if product.units.all %}
-            <div class="card shadow">
-                <div class="card-header bg-white py-3">
-                    <h5 class="card-title mb-0 fw-bold">
-                        <i class="fas fa-chart-line text-primary me-2"></i>Price per Unit Comparison
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Unit</th>
-                                    <th>Quantity</th>
-                                    <th>Total Cost</th>
-                                    <th>Cost per Base Unit</th>
-                                    <th>Selling Price per Base Unit</th>
-                                    <th>Margin</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for unit in product.units.all %}
-                                <tr>
-                                    <td><strong>{{ unit.unit_name|title }}</strong></td>
-                                    <td>{{ unit.quantity_in_base|floatformat:0 }} {{ product.base_unit }}s</td>
-                                    <td>UGX {% widthratio product.cost_price 1 unit.quantity_in_base %}</td>
-                                    <td>UGX {{ product.cost_price|floatformat:0 }}</td>
-                                    <td>UGX {% widthratio unit.selling_price 1 unit.quantity_in_base %}</td>
-                                    <td>
-                                        {% with cost_per_base=product.cost_price|floatformat:0|add:0 %}
-                                        {% with selling_per_base=unit.selling_price|floatformat:0|add:0 %}
-                                        {% with margin=selling_per_base|add:cost_per_base|add:0 %}
-                                        <span class="{% if margin > 0 %}text-success{% else %}text-danger{% endif %}">
-                                            {{ margin }}%
-                                        </span>
-                                        {% endwith %}
-                                        {% endwith %}
-                                        {% endwith %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                </p>
+                <a href="{% url 'inventory:product_add' %}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Add Product
+                </a>
             </div>
             {% endif %}
         </div>
     </div>
 
-    <!-- Recent Transactions -->
-    <div class="row mt-4">
-        <div class="col-12">
-            <div class="card shadow">
-                <div class="card-header bg-white py-3">
-                    <h5 class="card-title mb-0 fw-bold">
-                        <i class="fas fa-history text-primary me-2"></i>Recent Transactions
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <ul class="nav nav-tabs" id="transactionTabs" role="tablist">
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link active" id="purchases-tab" data-bs-toggle="tab" data-bs-target="#purchases" type="button" role="tab">
-                                <i class="fas fa-shopping-cart"></i> Purchases ({{ purchase_items|length }})
-                            </button>
-                        </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="sales-tab" data-bs-toggle="tab" data-bs-target="#sales" type="button" role="tab">
-                                <i class="fas fa-cash-register"></i> Sales ({{ sale_items|length }})
-                            </button>
-                        </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="transfers-tab" data-bs-toggle="tab" data-bs-target="#transfers" type="button" role="tab">
-                                <i class="fas fa-exchange-alt"></i> Transfers ({{ transfers_out|length|add:transfers_in|length }})
-                            </button>
-                        </li>
-                    </ul>
-                    <div class="tab-content mt-3">
-                        <!-- Purchases Tab -->
-                        <div class="tab-pane fade show active" id="purchases" role="tabpanel">
-                            {% if purchase_items %}
-                            <div class="table-responsive">
-                                <table class="table table-sm">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Location</th>
-                                            <th>Quantity</th>
-                                            <th>Unit Price</th>
-                                            <th>Total</th>
-                                            <th>Reference</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for item in purchase_items|slice:":10" %}
-                                        <tr>
-                                            <td>{{ item.purchase.purchase_date|date:"Y-m-d H:i" }}</td>
-                                            <td>{{ item.purchase.location.name }}</td>
-                                            <td>
-                                                <span class="fw-bold">{{ item.base_quantity|floatformat:0|default:item.quantity|floatformat:0 }}</span>
-                                                <span class="text-muted">{{ product.base_unit }}s</span>
-                                                {% if item.unit_name %}
-                                                <br><small class="text-muted">({{ item.quantity }} {{ item.unit_name }})</small>
-                                                {% endif %}
-                                            </td>
-                                            <td>UGX {{ item.unit_price|floatformat:0 }}</td>
-                                            <td>UGX {{ item.total_price|floatformat:0 }}</td>
-                                            <td><code>{{ item.purchase.reference|default:"-" }}</code></td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {% else %}
-                            <p class="text-muted text-center py-3">No purchase records found.</p>
-                            {% endif %}
-                        </div>
-
-                        <!-- Sales Tab -->
-                        <div class="tab-pane fade" id="sales" role="tabpanel">
-                            {% if sale_items %}
-                            <div class="table-responsive">
-                                <table class="table table-sm">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Customer</th>
-                                            <th>Location</th>
-                                            <th>Quantity</th>
-                                            <th>Unit Price</th>
-                                            <th>Total</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for item in sale_items|slice:":10" %}
-                                        <tr>
-                                            <td>{{ item.sale.date|date:"Y-m-d H:i" }}</td>
-                                            <td>{{ item.sale.customer.name|default:"Walk-in" }}</td>
-                                            <td>{{ item.sale.location.name }}</td>
-                                            <td>
-                                                <span class="fw-bold">{{ item.base_quantity|floatformat:0|default:item.quantity|floatformat:0 }}</span>
-                                                <span class="text-muted">{{ product.base_unit }}s</span>
-                                                {% if item.unit_name %}
-                                                <br><small class="text-muted">({{ item.quantity }} {{ item.unit_name }})</small>
-                                                {% endif %}
-                                            </td>
-                                            <td>UGX {{ item.unit_price|floatformat:0 }}</td>
-                                            <td>UGX {{ item.total_price|floatformat:0 }}</td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {% else %}
-                            <p class="text-muted text-center py-3">No sale records found.</p>
-                            {% endif %}
-                        </div>
-
-                        <!-- Transfers Tab -->
-                        <div class="tab-pane fade" id="transfers" role="tabpanel">
-                            {% if transfers_out or transfers_in %}
-                            <div class="table-responsive">
-                                <table class="table table-sm">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>From</th>
-                                            <th>To</th>
-                                            <th>Quantity</th>
-                                            <th>Transferred By</th>
-                                            <th>Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for transfer in transfers_out|slice:":10" %}
-                                        <tr>
-                                            <td>{{ transfer.transfer_date|date:"Y-m-d H:i" }}</td>
-                                            <td>{{ transfer.batch.from_location.name }}</td>
-                                            <td>{{ transfer.batch.to_location.name }}</td>
-                                            <td>
-                                                <span class="fw-bold">{{ transfer.base_quantity|floatformat:0|default:transfer.quantity|floatformat:0 }}</span>
-                                                <span class="text-muted">{{ product.base_unit }}s</span>
-                                            </td>
-                                            <td>{{ transfer.transferred_by.username|default:"-" }}</td>
-                                            <td><span class="badge bg-info">{{ transfer.status|title }}</span></td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {% else %}
-                            <p class="text-muted text-center py-3">No transfer records found.</p>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-            </div>
+    <!-- Pagination -->
+    {% if page_obj and page_obj.paginator.num_pages > 1 %}
+    <div class="d-flex justify-content-between align-items-center mt-4">
+        <div class="text-muted small">
+            Showing {{ page_obj.start_index }} to {{ page_obj.end_index }} of {{ page_obj.paginator.count }} entries
         </div>
+        <nav>
+            <ul class="pagination mb-0">
+                {% if page_obj.has_previous %}
+                <li class="page-item"><a class="page-link" href="?page=1{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}"><i class="fas fa-angle-double-left"></i></a></li>
+                <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}"><i class="fas fa-angle-left"></i></a></li>
+                {% endif %}
+                
+                {% for num in page_obj.paginator.page_range %}
+                    {% if num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' %}
+                    <li class="page-item {% if page_obj.number == num %}active{% endif %}">
+                        <a class="page-link" href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">{{ num }}</a>
+                    </li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if page_obj.has_next %}
+                <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}"><i class="fas fa-angle-right"></i></a></li>
+                <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}"><i class="fas fa-angle-double-right"></i></a></li>
+                {% endif %}
+            </ul>
+        </nav>
     </div>
+    {% endif %}
 </div>
 
 <style>
+/* Modern Styling */
+:root {
+    --primary: #4e73df;
+    --success: #1cc88a;
+    --warning: #f6c23e;
+    --danger: #e74a3b;
+    --info: #36b9cc;
+}
+
+.card {
+    border: none;
+    border-radius: 12px;
+}
+
+.card.border-left-primary { border-left: 4px solid var(--primary); border-radius: 12px; }
+.card.border-left-success { border-left: 4px solid var(--success); border-radius: 12px; }
+.card.border-left-warning { border-left: 4px solid var(--warning); border-radius: 12px; }
+.card.border-left-danger { border-left: 4px solid var(--danger); border-radius: 12px; }
+
+.product-icon {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+}
+
+.sku-badge {
+    background: #f1f3f5;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-family: monospace;
+}
+
 .category-badge {
     background: #e9ecef;
     padding: 4px 10px;
     border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.unit-cell {
+    min-width: 180px;
+}
+
+.unit-selector {
     font-size: 0.8rem;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.conversion-hint {
+    font-size: 0.7rem;
+}
+
+.price-amount {
+    font-weight: bold;
+    font-size: 1rem;
+    color: #10b981;
 }
 
 .stock-badge {
@@ -534,17 +460,7 @@
     padding: 5px 12px;
     border-radius: 20px;
     font-weight: bold;
-    font-size: 0.85rem;
-    display: inline-block;
-}
-
-.stock-location-badge {
-    background: #e9ecef;
-    color: #333;
-    padding: 5px 12px;
-    border-radius: 20px;
-    font-weight: bold;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     display: inline-block;
 }
 
@@ -552,19 +468,19 @@
     padding: 5px 12px;
     border-radius: 20px;
     font-weight: bold;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     display: inline-block;
-    min-width: 60px;
+    min-width: 70px;
 }
 
-.unit-stock-badge.bg-success { background: #1cc88a !important; color: white; }
-.unit-stock-badge.bg-warning { background: #f6c23e !important; color: #333; }
-.unit-stock-badge.bg-danger { background: #e74a3b !important; color: white; }
+.unit-stock-badge.bg-success { background: var(--success) !important; color: white; }
+.unit-stock-badge.bg-warning { background: var(--warning) !important; color: #333; }
+.unit-stock-badge.bg-danger { background: var(--danger) !important; color: white; }
 
 .status-badge {
-    padding: 4px 10px;
+    padding: 5px 12px;
     border-radius: 20px;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     font-weight: 600;
 }
 
@@ -583,97 +499,257 @@
     color: #991b1b;
 }
 
-.conversion-badge {
-    background: #f1f3f5;
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 0.75rem;
-    font-family: monospace;
-}
-
-.unit-icon {
-    width: 32px;
-    height: 32px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 8px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-}
-
-.cost-price {
-    color: #6c757d;
-    font-size: 0.9rem;
-}
-
-.selling-price {
-    font-size: 1rem;
-}
-
-.unit-row {
-    transition: all 0.2s ease;
-}
-
-.unit-row:hover {
-    background-color: #f8f9fa;
-}
-
-.card {
-    border: none;
-    border-radius: 12px;
-}
-
-.nav-tabs .nav-link {
-    color: #6c757d;
-    border: none;
-    padding: 10px 20px;
-}
-
-.nav-tabs .nav-link.active {
-    color: #4e73df;
-    border-bottom: 2px solid #4e73df;
+.stock-cell, .unit-stock-cell {
     background: transparent;
 }
 
-.table td, .table th {
-    padding: 0.75rem;
+.table > :not(caption) > * > * {
+    padding: 1rem 0.75rem;
     vertical-align: middle;
 }
 
-.progress {
-    border-radius: 10px;
-    overflow: hidden;
+.table-hover tbody tr:hover {
+    background-color: #f8f9fa;
+    transition: all 0.2s ease;
 }
 
-.progress-bar {
-    transition: width 0.3s ease;
+.btn-group-sm > .btn {
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .table-responsive {
+        font-size: 0.85rem;
+    }
+    
+    .product-icon {
+        width: 30px;
+        height: 30px;
+    }
+    
+    .btn-group-sm > .btn {
+        padding: 0.2rem 0.4rem;
+    }
 }
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Format numbers function
+    
+    // Format number with commas
     function formatNumber(value) {
-        if (!value && value !== 0) return '0';
+        if (value === undefined || value === null || isNaN(value)) return '0';
         return parseFloat(value).toLocaleString('en-UG');
     }
     
-    // Auto-refresh stock calculations for units (optional)
-    const currentStock = {{ current_stock|default:0 }};
+    // Calculate unit stock
+    function calculateUnitStock(baseStock, conversion, isBaseUnit) {
+        if (isNaN(baseStock) || baseStock === null) return 0;
+        if (isNaN(conversion) || conversion <= 0) conversion = 1;
+        if (isBaseUnit || conversion == 1) return baseStock;
+        return baseStock / conversion;
+    }
     
-    // Update unit stock displays dynamically
-    const unitStockSpans = document.querySelectorAll('.unit-stock-badge');
-    unitStockSpans.forEach(span => {
-        const conversion = span.dataset.conversion;
-        if (conversion) {
-            const converted = currentStock / conversion;
-            if (converted >= 1) {
-                span.textContent = Math.floor(converted);
+    // Update unit stock display
+    function updateUnitStock(productId, baseStock, conversion, unitName, unitPrice, isBaseUnit, baseUnit) {
+        let unitStock = calculateUnitStock(parseFloat(baseStock), parseFloat(conversion), isBaseUnit);
+        
+        let displayValue = unitStock >= 1 ? Math.floor(unitStock) : unitStock.toFixed(2);
+        
+        // Update unit stock
+        const stockSpan = document.getElementById(`unit-stock-${productId}`);
+        const labelSpan = document.getElementById(`unit-label-${productId}`);
+        
+        if (stockSpan) {
+            stockSpan.textContent = displayValue;
+            if (unitStock <= 0) {
+                stockSpan.className = 'unit-stock-badge unit-stock-value bg-danger';
+            } else if (unitStock <= 10) {
+                stockSpan.className = 'unit-stock-badge unit-stock-value bg-warning';
             } else {
-                span.textContent = converted.toFixed(2);
+                stockSpan.className = 'unit-stock-badge unit-stock-value bg-success';
             }
         }
+        
+        if (labelSpan) {
+            labelSpan.textContent = unitStock === 1 ? unitName : `${unitName}s`;
+        }
+        
+        // Update price
+        const priceSpan = document.getElementById(`price-${productId}`);
+        if (priceSpan && unitPrice) {
+            priceSpan.textContent = `UGX ${formatNumber(unitPrice)}`;
+        }
+        
+        // Update conversion hint
+        const convHint = document.getElementById(`conv-${productId}`);
+        if (convHint) {
+            if (isBaseUnit) {
+                convHint.innerHTML = `1 ${unitName} = 1 ${baseUnit}`;
+            } else {
+                convHint.innerHTML = `1 ${unitName} = ${Math.round(conversion)} ${baseUnit}`;
+            }
+        }
+    }
+    
+    // Initialize unit selectors
+    const unitSelectors = document.querySelectorAll('.unit-selector');
+    
+    unitSelectors.forEach(selector => {
+        const productId = selector.dataset.productId;
+        const row = selector.closest('tr');
+        let baseStock = parseFloat(row.dataset.baseStock);
+        const baseUnit = selector.dataset.baseUnit;
+        
+        if (isNaN(baseStock)) baseStock = 0;
+        
+        const initialOption = selector.options[selector.selectedIndex];
+        updateUnitStock(
+            productId, baseStock,
+            initialOption.dataset.conversion,
+            initialOption.dataset.unitName,
+            initialOption.dataset.price,
+            initialOption.dataset.isBase === 'true',
+            baseUnit
+        );
+        
+        selector.addEventListener('change', function() {
+            const option = this.options[this.selectedIndex];
+            updateUnitStock(
+                productId, baseStock,
+                option.dataset.conversion,
+                option.dataset.unitName,
+                option.dataset.price,
+                option.dataset.isBase === 'true',
+                baseUnit
+            );
+        });
+    });
+    
+    // Filter functionality
+    const searchInput = document.getElementById('searchInput');
+    const categoryFilter = document.getElementById('categoryFilter');
+    const sortBy = document.getElementById('sortBy');
+    const applyBtn = document.getElementById('applyFiltersBtn');
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+    
+    function applyFilters() {
+        const params = new URLSearchParams();
+        if (searchInput.value) params.set('q', searchInput.value);
+        if (categoryFilter.value) params.set('category', categoryFilter.value);
+        if (sortBy.value) params.set('sort', sortBy.value);
+        window.location.href = `${window.location.pathname}?${params.toString()}`;
+    }
+    
+    if (applyBtn) applyBtn.addEventListener('click', applyFilters);
+    
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') applyFilters();
+        });
+        searchInput.addEventListener('input', function() {
+            clearSearchBtn.style.display = this.value ? 'block' : 'none';
+        });
+    }
+    
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', function() {
+            searchInput.value = '';
+            applyFilters();
+        });
+    }
+    
+    // Refresh stock
+    async function refreshStock() {
+        const btn = document.getElementById('refreshStockBtn');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        btn.disabled = true;
+        
+        try {
+            const rows = document.querySelectorAll('.product-row');
+            for (const row of rows) {
+                const productId = row.dataset.productId;
+                const response = await fetch(`/inventory/api/stock/${productId}/total/`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const newStock = data.total_stock || 0;
+                    row.dataset.baseStock = newStock;
+                    
+                    const stockSpan = document.getElementById(`stock-${productId}`);
+                    if (stockSpan) stockSpan.textContent = formatNumber(newStock);
+                    
+                    const selector = row.querySelector('.unit-selector');
+                    if (selector) {
+                        const option = selector.options[selector.selectedIndex];
+                        updateUnitStock(
+                            productId, newStock,
+                            option.dataset.conversion,
+                            option.dataset.unitName,
+                            option.dataset.price,
+                            option.dataset.isBase === 'true',
+                            row.dataset.baseUnit
+                        );
+                    }
+                }
+            }
+            showToast('Stock refreshed!', 'success');
+        } catch (error) {
+            showToast('Error refreshing stock', 'danger');
+        } finally {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+    
+    function showToast(message, type) {
+        const toast = document.createElement('div');
+        toast.className = `alert alert-${type} position-fixed bottom-0 end-0 m-3`;
+        toast.style.zIndex = '9999';
+        toast.innerHTML = message;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+    
+    document.getElementById('refreshStockBtn')?.addEventListener('click', refreshStock);
+    
+    // Export table
+    document.getElementById('exportTableBtn')?.addEventListener('click', function() {
+        const table = document.getElementById('productsTable');
+        const rows = table.querySelectorAll('tr');
+        let csv = [];
+        
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('th, td');
+            const rowData = Array.from(cells).map(cell => {
+                let text = cell.innerText.trim();
+                if (text.includes(',')) text = `"${text}"`;
+                return text;
+            }).join(',');
+            csv.push(rowData);
+        });
+        
+        const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `products_${new Date().toISOString().slice(0,19)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Export completed!', 'success');
+    });
+    
+    // Delete confirmation
+    document.querySelectorAll('.delete-product').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const productId = this.dataset.productId;
+            const productName = this.dataset.productName;
+            if (confirm(`Are you sure you want to delete "${productName}"?`)) {
+                window.location.href = `/inventory/products/${productId}/delete/`;
+            }
+        });
     });
 });
 </script>
