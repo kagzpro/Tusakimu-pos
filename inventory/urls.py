@@ -147,12 +147,21 @@ path('products/<int:product_id>/movement-export/', views.product_movement_export
     # Search and API
     path('search_product/', views.search_product, name='search_product'),
     path('api/products/', views.product_search_api, name='product_search_api'),
-    path('products/<int:pk>/delete/', views.product_delete, name='product_delete'),
+    # urls.py
+    path('api/update-unit-price/', views.update_unit_price, name='update_unit_price'),
+    path('api/set-default-unit/', views.set_default_unit, name='set_default_unit'),
     # ADD THESE TWO LINES - FIX FOR SALE FORM
     path('api/stock/<int:product_id>/<int:location_id>/', views.api_product_stock, name='api_product_stock'),
     path('api/product-units/<int:product_id>/', views.api_product_units, name='api_product_units'),
     path('import-fixed/', views.import_products_fixed, name='import_products_fixed'),
     # ... rest of your URLs ...
 
+    path('products/bulk-edit/', views.bulk_product_edit, name='bulk_product_edit'),
+    path('bulk-update-product/', views.bulk_update_product, name='bulk_update_product'),
+    path('bulk-update-multiple/', views.bulk_update_multiple_products, name='bulk_update_multiple_products'),
+    path('bulk-delete-products/', views.bulk_delete_products, name='bulk_delete_products'),
+    path('search-live/', views.search_products_live, name='search_products_live'),
+    path('calculate-price/', views.calculate_unit_price, name='calculate_unit_price'),
+   path('products/<int:pk>/delete/', views.product_delete, name='product_delete'),
 ] 
 
