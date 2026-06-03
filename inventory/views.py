@@ -375,6 +375,7 @@ def product_detail(request, product_id):
     return render(request, 'inventory/product_detail.html', context)
 
 
+
 @login_required
 @transaction.atomic
 def product_add(request):
