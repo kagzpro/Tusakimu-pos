@@ -52,3 +52,19 @@ def subtract(value, arg):
         return float(value) - float(arg)
     except (ValueError, TypeError):
         return 0
+
+
+# inventory/templatetags/inventory_filters.py
+from django import template
+
+register = template.Library()
+
+@register.filter
+def sum_quantity(stocks):
+    """Sum the quantity field from a list of stock objects"""
+    if not stocks:
+        return 0
+    total = 0
+    for stock in stocks:
+        total += stock.quantity or 0
+    return total
