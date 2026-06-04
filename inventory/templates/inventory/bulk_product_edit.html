@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-
+{% load l10n %}
 {% block title %}Bulk Product Manager{% endblock %}
 
 {% block content %}
@@ -22,17 +22,12 @@
         </div>
     </div>
 
-    <div class="card">
-
+    <!-- Filter Card -->
+    <div class="card mb-4">
         <div class="card-header">
             <div class="row">
-                <div class="col-md-4">
-                    <input
-                        type="text"
-                        id="searchBox"
-                        class="form-control"
-                        placeholder="Search product by name or SKU..."
-                    >
+                <div class="col-md-5">
+                    <input type="text" id="searchBox" class="form-control" placeholder="Search product by name or SKU...">
                 </div>
                 <div class="col-md-3">
                     <select id="categoryFilter" class="form-select">
@@ -42,7 +37,7 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <select id="locationFilter" class="form-select">
                         <option value="">All Locations</option>
                         {% for location in locations %}
@@ -55,7 +50,19 @@
                 </div>
             </div>
         </div>
+    </div>
 
+    <div class="card shadow">
+        <div class="card-header bg-white py-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0 fw-bold">
+                    <i class="fas fa-edit text-primary me-2"></i>Bulk Product Editor
+                </h5>
+                <button class="btn btn-sm btn-outline-success" id="exportFilteredBtn">
+                    <i class="fas fa-download"></i> Export Filtered
+                </button>
+            </div>
+        </div>
         <div class="card-body p-0">
 
             <div class="table-responsive">
@@ -78,21 +85,29 @@
                     <tbody id="productTable">
                     {% for product in products %}
                         {% for unit in product.units.all %}
-                        <tr class="product-row" data-product-id="{{ product.id }}" data-unit-id="{{ unit.id }}" data-conversion="{{ unit.quantity_in_base }}">
+                        <tr class="product-row" 
+                            data-product-id="{{ product.id }}" 
+                            data-unit-id="{{ unit.id }}" 
+                            data-conversion="{{ unit.quantity_in_base }}"
+                            data-product-name="{{ product.name|lower }}"
+                            data-product-sku="{{ product.sku|default:''|lower }}"
+                            data-category="{{ product.category.name|default:''|lower }}">
+                            
                             <td>
                                 <strong>{{ product.name }}</strong>
                                 <br>
                                 <small class="text-muted">Base: {{ product.base_unit|default:"piece" }}</small>
                             </td>
-                            <td><code>{{ product.sku|default:"-" }}</code></td>
-                            <td>{{ product.category.name|default:"-" }}</td>
+                            <td><code class="sku-badge">{{ product.sku|default:"-" }}</code></td>
+                            <td><span class="category-badge">{{ product.category.name|default:"-" }}</span></td>
                             <td>
+                                <!-- FIX 1: Use is_default instead of forloop.first -->
                                 <select class="form-select form-select-sm unit-selector" data-product-id="{{ product.id }}">
                                     {% for u in product.units.all %}
                                     <option value="{{ u.id }}" 
                                             data-unit-name="{{ u.unit_name }}"
                                             data-conversion="{{ u.quantity_in_base }}"
-                                            data-sale-price="{{ u.selling_price|floatformat:0 }}"
+                                            data-sale-price="{% load l10n %}{% localize off %}{{ u.selling_price }}{% endlocalize %}"
                                             {% if unit.id == u.id %}selected{% endif %}>
                                         {{ u.unit_name|title }}
                                         (1 = {{ u.quantity_in_base|floatformat:0 }} {{ product.base_unit }}s)
@@ -104,9 +119,9 @@
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text">UGX</span>
                                     <input type="number" class="form-control sale-price-input" 
-                                           value="{{ unit.selling_price|floatformat:0 }}" 
+                                           value="{% localize off %}{{ unit.selling_price }}{% endlocalize %}"
                                            step="100"
-                                           data-original="{{ unit.selling_price|floatformat:0 }}">
+                                           data-original="{% localize off %}{{ unit.selling_price }}{% endlocalize %}"
                                 </div>
                             </td>
                             <td class="stock-cell">
@@ -133,14 +148,8 @@
                             <td class="text-center">
                                 <div>
                                     <span class="badge unit-stock-badge" id="unit-stock-{{ product.id }}-{{ unit.id }}">
-                                        {% with total=0 %}
-                                            {% for stock in product.stocks.all %}
-                                                {% with total=total|add:stock.quantity %}
-                                                {% endwith %}
-                                            {% endfor %}
-                                            {% widthratio 0 1 unit.quantity_in_base as unit_stock %}
-                                            0
-                                        {% endwith %}
+                                        {% widthratio product.total_stock 1 unit.quantity_in_base as converted %}
+                                        {{ converted|floatformat:2 }}
                                     </span>
                                 </div>
                                 <div class="small text-muted">{{ unit.unit_name }}s</div>
@@ -198,6 +207,20 @@
     border: 2px solid #ffc107 !important;
     background-color: #fff3cd !important;
 }
+.sku-badge {
+    background: #f1f3f5;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-family: monospace;
+}
+.category-badge {
+    background: #e9ecef;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
 </style>
 
 <script>
@@ -207,6 +230,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function formatNumber(value) {
         if (!value && value !== 0) return '0';
         return parseFloat(value).toLocaleString('en-UG');
+    }
+
+    // FIX 3: Helper function to parse price with commas
+    function parsePrice(price) {
+        if (!price && price !== 0) return 0;
+        return parseFloat(String(price).replace(/,/g, '')) || 0;
     }
 
     // Calculate total base stock from all locations
@@ -226,8 +255,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const conversion = parseFloat(row.dataset.conversion);
         const totalBaseStock = calculateTotalBaseStock(row);
         
+        // FIX 4: Show 2 decimal places for better accuracy
         const unitStock = totalBaseStock / conversion;
-        const displayValue = unitStock >= 1 ? Math.floor(unitStock) : unitStock.toFixed(2);
+        const displayValue = unitStock.toFixed(2);
         const stockSpan = document.getElementById(`unit-stock-${productId}-${unitId}`);
         
         if (stockSpan) {
@@ -247,7 +277,8 @@ document.addEventListener('DOMContentLoaded', function() {
         selector.addEventListener('change', function() {
             const row = this.closest('tr');
             const selectedOption = this.options[this.selectedIndex];
-            const salePrice = parseFloat(selectedOption.dataset.salePrice);
+            // FIX 3: Use parsePrice helper
+            const salePrice = parsePrice(selectedOption.dataset.salePrice);
             const unitName = selectedOption.dataset.unitName;
             const conversion = parseFloat(selectedOption.dataset.conversion);
             
@@ -419,7 +450,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function filterRows() {
         const searchTerm = searchBox ? searchBox.value.toLowerCase() : '';
-        const categoryId = categoryFilter ? categoryFilter.value : '';
+        const categoryValue = categoryFilter ? categoryFilter.options[categoryFilter.selectedIndex]?.text.toLowerCase() : '';
         const locationText = locationFilter ? locationFilter.options[locationFilter.selectedIndex]?.text : '';
         
         let visibleCount = 0;
@@ -433,17 +464,24 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             // Category filter
-            if (show && categoryId) {
-                const categoryCell = row.querySelector('td:nth-child(3)');
-                if (categoryCell && categoryCell.textContent !== categoryFilter.options[categoryFilter.selectedIndex]?.text) {
+            if (show && categoryValue && categoryValue !== 'all categories') {
+                const rowCategory = row.querySelector('.category-badge')?.textContent.toLowerCase() || '';
+                if (rowCategory !== categoryValue) {
                     show = false;
                 }
             }
             
-            // Location filter - show/hide stock columns
-            if (locationFilter && locationFilter.value) {
-                const stockCells = row.querySelectorAll('.stock-input-group .input-group');
-                stockCells.forEach(group => {
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+        
+        // Location filter - show/hide stock columns (doesn't affect row visibility)
+        if (locationFilter && locationFilter.value) {
+            const locationText = locationFilter.options[locationFilter.selectedIndex]?.text;
+            const stockCells = document.querySelectorAll('.stock-cell');
+            stockCells.forEach(cell => {
+                const stockGroups = cell.querySelectorAll('.input-group');
+                stockGroups.forEach(group => {
                     const locationSpan = group.querySelector('.input-group-text');
                     if (locationSpan && !locationSpan.textContent.includes(locationText)) {
                         group.style.display = 'none';
@@ -451,20 +489,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         group.style.display = 'flex';
                     }
                 });
-            } else if (locationFilter && !locationFilter.value) {
-                const stockCells = row.querySelectorAll('.stock-input-group .input-group');
-                stockCells.forEach(group => {
+            });
+        } else {
+            const stockCells = document.querySelectorAll('.stock-cell');
+            stockCells.forEach(cell => {
+                const stockGroups = cell.querySelectorAll('.input-group');
+                stockGroups.forEach(group => {
                     group.style.display = 'flex';
                 });
-            }
-            
-            row.style.display = show ? '' : 'none';
-            if (show) visibleCount++;
-        });
+            });
+        }
         
         if (rowCountSpan) rowCountSpan.textContent = visibleCount;
     }
 
+    // Event listeners for filters
     if (searchBox) searchBox.addEventListener('keyup', filterRows);
     if (categoryFilter) categoryFilter.addEventListener('change', filterRows);
     if (locationFilter) locationFilter.addEventListener('change', filterRows);
@@ -474,10 +513,55 @@ document.addEventListener('DOMContentLoaded', function() {
         updateUnitStock(row);
     });
     
+    // Initial filter
     filterRows();
 
     // Refresh button
     document.getElementById('refreshBtn')?.addEventListener('click', () => window.location.reload());
+    
+    // Export filtered products
+    document.getElementById('exportFilteredBtn')?.addEventListener('click', function() {
+        const visibleRows = document.querySelectorAll('#productTable tr:not([style*="display: none"])');
+        let csv = 'Product,SKU,Category,Unit,Price,Stock,Unit Stock\n';
+        
+        visibleRows.forEach(row => {
+            const productName = row.querySelector('td:first-child strong')?.textContent || '';
+            const sku = row.querySelector('.sku-badge')?.textContent || '';
+            const category = row.querySelector('.category-badge')?.textContent || '';
+            const unit = row.querySelector('.unit-selector option:selected')?.textContent || '';
+            const price = row.querySelector('.sale-price-input')?.value || '';
+            const stockInputs = row.querySelectorAll('.stock-input');
+            let stockTotal = 0;
+            stockInputs.forEach(input => {
+                stockTotal += parseFloat(input.value) || 0;
+            });
+            const unitStock = row.querySelector('.unit-stock-badge')?.textContent || '';
+            
+            csv += `"${productName}","${sku}","${category}","${unit}","${price}","${stockTotal}","${unitStock}"\n`;
+        });
+        
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `bulk_edit_export_${new Date().toISOString().slice(0,19)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Export completed!', 'success');
+    });
+    
+    function showToast(message, type) {
+        const toast = document.createElement('div');
+        toast.className = `alert alert-${type} position-fixed bottom-0 end-0 m-3`;
+        toast.style.zIndex = '9999';
+        toast.style.backgroundColor = type === 'success' ? '#10b981' : '#ef4444';
+        toast.style.color = 'white';
+        toast.style.padding = '12px 20px';
+        toast.style.borderRadius = '8px';
+        toast.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2"></i>${message}`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
 });
 </script>
 
