@@ -155,13 +155,14 @@ path('products/<int:product_id>/movement-export/', views.product_movement_export
     path('api/product-units/<int:product_id>/', views.api_product_units, name='api_product_units'),
     path('import-fixed/', views.import_products_fixed, name='import_products_fixed'),
     # ... rest of your URLs ...
-
+# inventory/urls.py
+    path('bulk-add-product/', views.bulk_add_product, name='bulk_add_product'),
     path('products/bulk-edit/', views.bulk_product_edit, name='bulk_product_edit'),
     path('bulk-update-product/', views.bulk_update_product, name='bulk_update_product'),
     path('bulk-update-multiple/', views.bulk_update_multiple_products, name='bulk_update_multiple_products'),
     path('bulk-delete-products/', views.bulk_delete_products, name='bulk_delete_products'),
     path('search-live/', views.search_products_live, name='search_products_live'),
     path('calculate-price/', views.calculate_unit_price, name='calculate_unit_price'),
-   path('products/<int:pk>/delete/', views.product_delete, name='product_delete'),
+    path('products/<int:pk>/delete/', views.product_delete, name='product_delete'),
 ] 
 
