@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-
+{% load l10n %}
 {% block content %}
 <div class="container mt-4">
     <h2>Edit Product - {{ product.name }}</h2>
@@ -83,16 +83,24 @@
                 <div class="row">
                     <div class="col-md-6">
                         <div class="form-group mb-3">
-                            <label>Cost Price (UGX) per Base Unit *</label>
-                            <input type="number" step="0.01" name="cost_price" id="costPrice" value="{{ product.cost_price }}" class="form-control" required>
-                            <small class="text-muted">per {{ product.base_unit|default:"unit" }} (this will affect all units)</small>
+                            <label>Cost Price (UGX) per Base Unit</label>
+                           <input type="number" step="0.01"
+       name="cost_price"
+       id="costPrice"
+       value="{% localize off %}{{ product.cost_price }}{% endlocalize %}"
+       class="form-control">
+                            <small class="text-muted">per {{ product.base_unit|default:"unit" }} - leave empty to keep current</small>
                         </div>
                     </div>
                     <div class="col-md-6">
                         <div class="form-group mb-3">
                             <label>Selling Price (UGX) per Base Unit</label>
-                            <input type="number" step="0.01" name="selling_price" id="baseSellingPrice" value="{{ product.selling_price }}" class="form-control">
-                            <small class="text-muted">per {{ product.base_unit|default:"unit" }} (base reference price)</small>
+                           <input type="number" step="0.01"
+       name="selling_price"
+       id="baseSellingPrice"
+       value="{% localize off %}{{ product.selling_price }}{% endlocalize %}"
+       class="form-control">
+                            <small class="text-muted">per {{ product.base_unit|default:"unit" }} - leave empty to keep current</small>
                         </div>
                     </div>
                 </div>
@@ -139,16 +147,16 @@
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Quantity in Base *</label>
-                                    <input type="number" step="0.01" name="unit_quantity[]" value="{{ unit.quantity_in_base }}" class="form-control unit-quantity" placeholder="e.g., 50" required>
-                                    <small class="text-muted">= {{ unit.quantity_in_base }} {{ product.base_unit }}s</small>
+                                    <input type="number" step="1" name="unit_quantity[]" value="{{ unit.quantity_in_base|floatformat:"0" }}" class="form-control unit-quantity" placeholder="e.g., 50" required>
+                                    <small class="text-muted">= {{ unit.quantity_in_base|floatformat:"0" }} {{ product.base_unit }}s</small>
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Cost Price (UGX)</label>
-                                    <input type="text" class="form-control unit-cost-price" value="{% widthratio product.cost_price|default:0 1 unit.quantity_in_base %}" readonly disabled style="background-color: #e9ecef;">
+                                    <input type="text" class="form-control unit-cost-price" value="{% widthratio product.cost_price unit.quantity_in_base 1 %}" readonly disabled style="background-color: #e9ecef;">
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Selling Price (UGX) *</label>
-                                    <input type="number" step="0.01" name="unit_price[]" value="{{ unit.selling_price }}" class="form-control unit-selling-price" required>
+                                    <input type="number" step="0.01" name="unit_price[]"value="{% localize off %}{{ unit.selling_price }}{% endlocalize %}"  class="form-control unit-selling-price" required>
                                 </div>
                                 <div class="col-md-2">
                                     <label class="form-label">Price per {{ product.base_unit }}</label>
@@ -191,42 +199,44 @@
                     - <strong>Cost price</strong> is automatically calculated from the base unit cost<br>
                     - <strong>Selling price</strong> can be edited manually or auto-calculated using the buttons<br>
                     - The <strong>base unit</strong> is the smallest unit (e.g., piece, gram, ml)<br>
+                    - <strong>Quantity in Base</strong> uses whole numbers only (e.g., 20, not 20.5)<br>
                     - Example: If base unit = piece (UGX 1,000), a carton of 50 pieces will have cost = UGX 50,000
                 </div>
             </div>
         </div>
 
         <!-- Stock Quantities Section -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5>Stock Quantities by Location</h5>
-                <p class="text-muted mb-0">Current stock quantities in base units</p>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    {% for location in locations %}
-                    <div class="col-md-4 mb-3">
-                        <div class="form-group">
-                            <label>{{ location.name }}</label>
-                            <input type="number" name="quantity_{{ location.id }}" class="form-control" 
-                                   value="{% for stock in product.stocks.all %}{% if stock.location.id == location.id %}{{ stock.quantity }}{% endif %}{% endfor %}" 
-                                   min="0">
-                            <small class="text-muted">
-                                Current: 
-                                {% for stock in product.stocks.all %}
-                                    {% if stock.location.id == location.id %}
-                                        {{ stock.quantity }} {{ product.base_unit }}s
-                                    {% endif %}
-                                {% empty %}
-                                    0 {{ product.base_unit }}s
-                                {% endfor %}
-                            </small>
-                        </div>
-                    </div>
-                    {% endfor %}
+      <!-- Stock Quantities Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5>Stock Quantities by Location</h5>
+        <p class="text-muted mb-0">Current stock quantities in base units</p>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% for location in locations %}
+            <div class="col-md-4 mb-3">
+                <div class="form-group">
+                    <label>{{ location.name }}</label>
+                    <input type="number" name="quantity_{{ location.id }}" class="form-control" 
+                           value="{% for stock in product.stocks.all %}{% if stock.location.id == location.id %}{{ stock.quantity }}{% endif %}{% endfor %}" 
+                           min="0" step="1">
+                    <small class="text-muted">
+                        Current: 
+                        {% for stock in product.stocks.all %}
+                            {% if stock.location.id == location.id %}
+                                {{ stock.quantity|floatformat:0 }} {{ product.base_unit }}s
+                            {% endif %}
+                        {% empty %}
+                            0 {{ product.base_unit }}s
+                        {% endfor %}
+                    </small>
                 </div>
             </div>
+            {% endfor %}
         </div>
+    </div>
+</div>
 
         <div class="mt-4">
             <button type="submit" class="btn btn-primary">Update Product</button>
@@ -245,17 +255,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const baseCostPrice = document.getElementById('costPrice');
     const baseSellingPrice = document.getElementById('baseSellingPrice');
     
-    // CRITICAL: Store original values to prevent loss
-    let originalCostPrice = baseCostPrice ? baseCostPrice.value : 0;
-    let originalSellingPrice = baseSellingPrice ? baseSellingPrice.value : 0;
-    
     // Function to recalculate cost price for a unit
     function recalculateCostPrice(row) {
         const quantityInput = row.querySelector('.unit-quantity');
         const costPriceField = row.querySelector('.unit-cost-price');
         
-        if (quantityInput && costPriceField && baseCostPrice) {
-            const quantity = parseFloat(quantityInput.value) || 0;
+        if (quantityInput && costPriceField) {
+            const quantity = parseInt(quantityInput.value) || 0;
             const baseCost = parseFloat(baseCostPrice.value) || 0;
             const calculatedCost = baseCost * quantity;
             costPriceField.value = calculatedCost.toFixed(2);
@@ -269,7 +275,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const pricePerBaseField = row.querySelector('.price-per-base');
         
         if (quantityInput && sellingPriceInput && pricePerBaseField) {
-            const quantity = parseFloat(quantityInput.value) || 0;
+            const quantity = parseInt(quantityInput.value) || 0;
             const sellingPrice = parseFloat(sellingPriceInput.value) || 0;
             if (quantity > 0) {
                 pricePerBaseField.value = (sellingPrice / quantity).toFixed(2);
@@ -284,8 +290,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const quantityInput = row.querySelector('.unit-quantity');
         const sellingPriceInput = row.querySelector('.unit-selling-price');
         
-        if (quantityInput && sellingPriceInput && baseSellingPrice) {
-            const quantity = parseFloat(quantityInput.value) || 0;
+        if (quantityInput && sellingPriceInput) {
+            const quantity = parseInt(quantityInput.value) || 0;
             const basePrice = parseFloat(baseSellingPrice.value) || 0;
             const calculatedPrice = basePrice * quantity * multiplier;
             sellingPriceInput.value = calculatedPrice.toFixed(2);
@@ -305,11 +311,11 @@ document.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('.unit-row').forEach(row => {
             const quantityInput = row.querySelector('.unit-quantity');
             const sellingPriceInput = row.querySelector('.unit-selling-price');
-            if (quantityInput && sellingPriceInput && baseSellingPrice) {
+            if (quantityInput && sellingPriceInput) {
+                const quantity = parseInt(quantityInput.value) || 0;
+                const basePrice = parseFloat(baseSellingPrice.value) || 0;
                 // Only auto-update if the price hasn't been manually edited
                 if (!sellingPriceInput.hasAttribute('data-manual-edited')) {
-                    const quantity = parseFloat(quantityInput.value) || 0;
-                    const basePrice = parseFloat(baseSellingPrice.value) || 0;
                     sellingPriceInput.value = (basePrice * quantity).toFixed(2);
                     recalculatePricePerBase(row);
                 }
@@ -317,35 +323,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // CRITICAL: Ensure base prices are never cleared on edit
+    // Listen to base cost price changes
     if (baseCostPrice) {
-        // Restore original value if somehow cleared
-        if (!baseCostPrice.value || baseCostPrice.value === '') {
-            baseCostPrice.value = originalCostPrice;
-        }
-        
         baseCostPrice.addEventListener('input', function() {
-            if (!this.value || this.value === '') {
-                this.value = originalCostPrice;
-            } else {
-                originalCostPrice = this.value;
-            }
             updateAllCostPrices();
         });
     }
     
+    // Listen to base selling price changes
     if (baseSellingPrice) {
-        // Restore original value if somehow cleared
-        if (!baseSellingPrice.value || baseSellingPrice.value === '') {
-            baseSellingPrice.value = originalSellingPrice;
-        }
-        
         baseSellingPrice.addEventListener('input', function() {
-            if (!this.value || this.value === '') {
-                this.value = originalSellingPrice;
-            } else {
-                originalSellingPrice = this.value;
-            }
             updateAllSellingPrices();
         });
     }
@@ -439,7 +426,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="col-md-2">
                         <label class="form-label">Quantity in Base *</label>
-                        <input type="number" step="0.01" name="unit_quantity[]" class="form-control unit-quantity" placeholder="e.g., 50" required>
+                        <input type="number" step="1" name="unit_quantity[]" class="form-control unit-quantity" placeholder="e.g., 50" required>
                         <small class="text-muted">= X ${baseUnit}s</small>
                     </div>
                     <div class="col-md-2">
@@ -486,7 +473,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const quantityInput = newRow.querySelector('.unit-quantity');
             const sellingPriceInput = newRow.querySelector('.unit-selling-price');
             
-            if (quantityInput && sellingPriceInput && baseSellingPrice) {
+            if (quantityInput && sellingPriceInput) {
                 quantityInput.value = 1;
                 const basePrice = parseFloat(baseSellingPrice.value) || 0;
                 sellingPriceInput.value = (basePrice * 1).toFixed(2);
@@ -501,19 +488,10 @@ document.addEventListener('DOMContentLoaded', function() {
         setupRowEvents(row);
     });
     
-    // CRITICAL: Form submission - ensure prices are never empty
+    // Form submission - ensure at least one default unit exists
     const form = document.querySelector('form');
     if (form) {
         form.addEventListener('submit', function(e) {
-            // Ensure base prices are not empty
-            if (baseCostPrice && (!baseCostPrice.value || baseCostPrice.value === '')) {
-                baseCostPrice.value = originalCostPrice || 0;
-            }
-            if (baseSellingPrice && (!baseSellingPrice.value || baseSellingPrice.value === '')) {
-                baseSellingPrice.value = originalSellingPrice || 0;
-            }
-            
-            // Ensure at least one default unit is selected if units exist
             const defaultCheckboxes = document.querySelectorAll('input[name="unit_default[]"]:checked');
             if (defaultCheckboxes.length === 0 && document.querySelectorAll('.unit-row').length > 0) {
                 const firstCheckbox = document.querySelector('input[name="unit_default[]"]');
@@ -521,19 +499,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     firstCheckbox.checked = true;
                 }
             }
-            
-            // Ensure all unit selling prices are valid
-            document.querySelectorAll('.unit-row').forEach(row => {
-                const sellingPriceInput = row.querySelector('.unit-selling-price');
-                if (sellingPriceInput && (!sellingPriceInput.value || sellingPriceInput.value === '')) {
-                    const quantityInput = row.querySelector('.unit-quantity');
-                    if (quantityInput && baseSellingPrice) {
-                        const quantity = parseFloat(quantityInput.value) || 0;
-                        const basePrice = parseFloat(baseSellingPrice.value) || 0;
-                        sellingPriceInput.value = (basePrice * quantity).toFixed(2);
-                    }
-                }
-            });
         });
     }
 });
