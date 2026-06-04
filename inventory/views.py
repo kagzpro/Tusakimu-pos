@@ -9237,3 +9237,132 @@ def bulk_delete_products(request):
             'success': False,
             'error': str(e)
         }, status=500)
+
+
+
+# inventory/bulk_views.py
+from django.views.decorators.http import require_POST
+from django.db import transaction
+from django.http import JsonResponse
+from .models import Product, Category, ProductUnit, ProductStock
+
+@require_POST
+@transaction.atomic
+def bulk_add_product(request):
+    """Add a new product with units from the bulk edit page"""
+    
+    if not request.user.is_superuser:
+        return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+    
+    try:
+        # Get product basic info
+        name = request.POST.get('name')
+        sku = request.POST.get('sku')
+        category_id = request.POST.get('category')
+        base_unit = request.POST.get('base_unit', 'piece')
+        cost_price = float(request.POST.get('cost_price', 0))
+        selling_price = float(request.POST.get('selling_price', 0))
+        reorder_level = int(request.POST.get('reorder_level', 10))
+        
+        # Validate required fields
+        if not name:
+            return JsonResponse({'success': False, 'error': 'Product name is required'})
+        
+        # Auto-generate SKU if not provided
+        if not sku:
+            prefix = name[:3].upper()
+            import time
+            sku = f"{prefix}-{int(time.time())}"
+        
+        # Check if SKU already exists
+        if Product.objects.filter(sku=sku).exists():
+            return JsonResponse({'success': False, 'error': f'SKU "{sku}" already exists'})
+        
+        # Get category
+        category = None
+        if category_id:
+            try:
+                category = Category.objects.get(id=category_id)
+            except Category.DoesNotExist:
+                pass
+        
+        # Create product
+        product = Product.objects.create(
+            name=name,
+            sku=sku,
+            category=category,
+            base_unit=base_unit,
+            cost_price=cost_price,
+            selling_price=selling_price,
+            reorder_level=reorder_level
+        )
+        
+        # Create base unit
+        ProductUnit.objects.create(
+            product=product,
+            unit_name=base_unit,
+            quantity_in_base=1,
+            selling_price=selling_price,
+            is_default=True
+        )
+        
+        # Process additional units
+        unit_names = request.POST.getlist('unit_name[]')
+        unit_quantities = request.POST.getlist('unit_quantity[]')
+        unit_prices = request.POST.getlist('unit_price[]')
+        
+        for i in range(len(unit_names)):
+            if unit_names[i] and unit_quantities[i]:
+                try:
+                    qty = float(unit_quantities[i])
+                    price = float(unit_prices[i]) if unit_prices[i] else 0
+                    
+                    # Skip if it's the base unit with quantity 1
+                    if unit_names[i].lower() == base_unit.lower() and qty == 1:
+                        continue
+                    
+                    ProductUnit.objects.create(
+                        product=product,
+                        unit_name=unit_names[i].lower(),
+                        quantity_in_base=qty,
+                        selling_price=price,
+                        is_default=False
+                    )
+                except (ValueError, TypeError):
+                    pass
+        
+        # Process initial stock if location provided
+        location_id = request.POST.get('location_id')
+        initial_stock = request.POST.get('initial_stock', 0)
+        
+        if location_id and initial_stock:
+            try:
+                from core.models import Location
+                location = Location.objects.get(id=location_id)
+                stock_qty = int(float(initial_stock))
+                if stock_qty > 0:
+                    ProductStock.objects.create(
+                        product=product,
+                        location=location,
+                        quantity=stock_qty
+                    )
+            except Exception:
+                pass
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'Product "{name}" added successfully',
+            'product': {
+                'id': product.id,
+                'name': product.name,
+                'sku': product.sku,
+                'selling_price': float(product.selling_price),
+                'base_unit': product.base_unit,
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
