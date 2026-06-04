@@ -1,27 +1,27 @@
 {% extends "base.html" %}
 {% load static %}
 {% load l10n %}
+
 {% block title %}Products - Tusakimu Enterprises Inventory Management{% endblock %}
 
 {% block content %}
+
 <div class="container-fluid mt-4">
-    <!-- Header Section -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3>
+            <i class="fas fa-boxes"></i>
+            Products
+        </h3>
         <div>
-            <h2 class="mb-1">Products</h2>
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb mb-0">
-                    <li class="breadcrumb-item"><a href="{% url 'inventory:dashboard' %}">Dashboard</a></li>
-                    <li class="breadcrumb-item active">Products</li>
-                </ol>
-            </nav>
-        </div>
-        <div class="btn-group">
-            <a href="{% url 'inventory:import_products' %}" class="btn btn-success">
-                <i class="fas fa-file-import"></i> Import CSV
-            </a>
+            <button class="btn btn-info" id="refreshStockBtn">
+                <i class="fas fa-sync-alt"></i> Refresh Stock
+            </button>
             <a href="{% url 'inventory:export_products' %}" class="btn btn-outline-secondary">
                 <i class="fas fa-file-export"></i> Export
+            </a>
+            <a href="{% url 'inventory:import_products' %}" class="btn btn-success">
+                <i class="fas fa-file-import"></i> Import CSV
             </a>
             <a href="{% url 'inventory:product_add' %}" class="btn btn-primary">
                 <i class="fas fa-plus"></i> Add Product
@@ -85,6 +85,36 @@
         </div>
     </div>
 
+    <!-- Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <div class="row">
+                <div class="col-md-4">
+                    <input type="text" id="searchBox" class="form-control" placeholder="Search product by name or SKU...">
+                </div>
+                <div class="col-md-3">
+                    <select id="categoryFilter" class="form-select">
+                        <option value="">All Categories</option>
+                        {% for category in categories %}
+                        <option value="{{ category.id }}">{{ category.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select id="stockStatusFilter" class="form-select">
+                        <option value="">All Stock Status</option>
+                        <option value="in_stock">In Stock</option>
+                        <option value="low_stock">Low Stock</option>
+                        <option value="out_of_stock">Out of Stock</option>
+                    </select>
+                </div>
+                <div class="col-md-2 text-end">
+                    <span class="badge bg-info" id="rowCount">0</span> products
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Products Table -->
     <div class="card shadow">
         <div class="card-header bg-white py-3">
@@ -92,16 +122,16 @@
                 <h5 class="card-title mb-0 fw-bold">
                     <i class="fas fa-list text-primary me-2"></i>Products List
                 </h5>
-                <button class="btn btn-sm btn-info" id="refreshStockBtn">
-                    <i class="fas fa-sync-alt"></i> Refresh Stock
+                <button class="btn btn-sm btn-outline-success" id="exportFilteredBtn">
+                    <i class="fas fa-download"></i> Export Filtered
                 </button>
             </div>
         </div>
         <div class="card-body p-0">
             {% if product_data %}
             <div class="table-responsive">
-                <table class="table table-hover mb-0" id="productsTable">
-                    <thead class="table-light">
+                <table class="table table-bordered table-hover mb-0" id="productsTable">
+                    <thead class="table-dark">
                         <tr>
                             <th style="width: 20%">Product</th>
                             <th style="width: 8%">SKU</th>
@@ -114,12 +144,16 @@
                             <th style="width: 5%">Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="productTable">
                         {% for item in product_data %}
                         <tr class="product-row" 
                             data-product-id="{{ item.product.id }}" 
                             data-base-unit="{{ item.product.base_unit|default:'piece' }}"
-                            data-base-stock="{{ item.total_stock|floatformat:0 }}">
+                            data-base-stock="{{ item.total_stock|floatformat:0 }}"
+                            data-product-name="{{ item.product.name|lower }}"
+                            data-product-sku="{{ item.product.sku|default:''|lower }}"
+                            data-category="{{ item.product.category.name|default:''|lower }}"
+                            data-status="{% if item.total_stock == 0 %}out_of_stock{% elif item.total_stock <= item.product.reorder_level %}low_stock{% else %}in_stock{% endif %}">
                             
                             <!-- Product Name -->
                             <td>
@@ -144,18 +178,18 @@
                             </td>
                             
                             <!-- SKU -->
-                            <td><code class="small">{{ item.product.sku|default:"-" }}</code></td>
+                            <td><code class="sku-badge">{{ item.product.sku|default:"-" }}</code></td>
                             
                             <!-- Category -->
                             <td>
                                 {% if item.product.category %}
-                                <span class="badge bg-secondary">{{ item.product.category.name }}</span>
+                                <span class="category-badge">{{ item.product.category.name }}</span>
                                 {% else %}
                                 <span class="text-muted">-</span>
                                 {% endif %}
                             </td>
                             
-                            <!-- Unit Selector - ACCESS DICTIONARY KEYS -->
+                            <!-- Unit Selector - FIX 1: Use is_default instead of forloop.first -->
                             <td>
                                 <select class="form-select form-select-sm unit-selector" 
                                         data-product-id="{{ item.product.id }}"
@@ -163,10 +197,10 @@
                                     {% for unit in item.units %}
                                     <option value="{{ unit.id }}" 
                                             data-unit-name="{{ unit.unit_name }}"
-        data-price="{% localize off %}{{ unit.selling_price }}{% endlocalize %}"
-                                            data-price="{{ unit.selling_price|floatformat:0 }}"
+                                            data-conversion="{{ unit.quantity_in_base }}"
+                                            data-price="{% localize off %}{{ unit.selling_price }}{% endlocalize %}"
                                             data-is-base="{% if unit.unit_name|lower == item.product.base_unit|lower %}true{% else %}false{% endif %}"
-                                            {% if forloop.first %}selected{% endif %}>
+                                            {% if unit.is_default %}selected{% endif %}>
                                         {{ unit.unit_name|title }}
                                         {% if unit.unit_name|lower == item.product.base_unit|lower %}
                                             (Base Unit)
@@ -177,18 +211,17 @@
                                     </option>
                                     {% endfor %}
                                 </select>
+                                <!-- FIX 2: Use default_unit instead of first_unit -->
                                 <div class="conversion-info small text-muted mt-1" id="conv-{{ item.product.id }}">
-                                    {% with first_unit=item.units|first %}
-                                        {% if first_unit %}
-                                            {% if first_unit.unit_name|lower == item.product.base_unit|lower %}
-                                                Base unit: 1 {{ first_unit.unit_name }} = 1 {{ item.product.base_unit }}
-                                            {% else %}
-                                                1 {{ first_unit.unit_name }} = {{ first_unit.quantity_in_base|floatformat:0 }} {{ item.product.base_unit }}s
-                                            {% endif %}
+                                    {% if item.default_unit %}
+                                        {% if item.default_unit.unit_name|lower == item.product.base_unit|lower %}
+                                            Base unit: 1 {{ item.default_unit.unit_name }} = 1 {{ item.product.base_unit }}
                                         {% else %}
-                                            Base unit: 1 {{ item.product.base_unit }} = 1 {{ item.product.base_unit }}
+                                            1 {{ item.default_unit.unit_name }} = {{ item.default_unit.quantity_in_base|floatformat:0 }} {{ item.product.base_unit }}s
                                         {% endif %}
-                                    {% endwith %}
+                                    {% else %}
+                                        Base unit: 1 {{ item.product.base_unit }} = 1 {{ item.product.base_unit }}
+                                    {% endif %}
                                 </div>
                             </td>
                             
@@ -212,7 +245,7 @@
                                 </div>
                             </td>
                             
-                            <!-- Unit Stock -->
+                            <!-- Unit Stock - FIX 2: Use default_unit instead of first_unit -->
                             <td class="text-center unit-stock-cell">
                                 <div class="unit-stock-wrapper">
                                     <span class="badge unit-stock-badge 
@@ -220,27 +253,23 @@
                                         {% elif item.total_stock <= item.product.reorder_level %}bg-warning
                                         {% else %}bg-success{% endif %}" 
                                         id="unit-stock-{{ item.product.id }}">
-                                        {% with first_unit=item.units|first %}
-                                            {% if first_unit %}
-                                                {% if first_unit.unit_name|lower == item.product.base_unit|lower %}
-                                                    {{ item.total_stock|floatformat:0 }}
-                                                {% else %}
-                                                    {% widthratio item.total_stock 1 first_unit.quantity_in_base as converted %}
-                                                    {{ converted|floatformat:0 }}
-                                                {% endif %}
-                                            {% else %}
+                                        {% if item.default_unit %}
+                                            {% if item.default_unit.unit_name|lower == item.product.base_unit|lower %}
                                                 {{ item.total_stock|floatformat:0 }}
+                                            {% else %}
+                                                {% widthratio item.total_stock 1 item.default_unit.quantity_in_base as converted %}
+                                                {{ converted|floatformat:2 }}
                                             {% endif %}
-                                        {% endwith %}
+                                        {% else %}
+                                            {{ item.total_stock|floatformat:0 }}
+                                        {% endif %}
                                     </span>
                                     <div class="small text-muted mt-1 unit-stock-label" id="unit-label-{{ item.product.id }}">
-                                        {% with first_unit=item.units|first %}
-                                            {% if first_unit %}
-                                                {{ first_unit.unit_name }}s
-                                            {% else %}
-                                                {{ item.product.base_unit }}s
-                                            {% endif %}
-                                        {% endwith %}
+                                        {% if item.default_unit %}
+                                            {{ item.default_unit.unit_name }}s
+                                        {% else %}
+                                            {{ item.product.base_unit }}s
+                                        {% endif %}
                                     </div>
                                 </div>
                             </td>
@@ -352,18 +381,47 @@
 .unit-stock-badge.bg-success { background: #1cc88a !important; color: white; }
 .unit-stock-badge.bg-warning { background: #f6c23e !important; color: #333; }
 .unit-stock-badge.bg-danger { background: #e74a3b !important; color: white; }
+
+.sku-badge {
+    background: #f1f3f5;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-family: monospace;
+}
+
+.category-badge {
+    background: #e9ecef;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.product-row {
+    transition: background-color 0.2s ease;
+}
+.product-row:hover {
+    background-color: #f8f9fa;
+}
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    
-    // Format number with commas - NO DIVISION
+
+    // ==================== HELPER FUNCTIONS ====================
     function formatNumber(value) {
         if (value === undefined || value === null || isNaN(value)) return '0';
         let num = parseFloat(value);
         return num.toLocaleString('en-UG');
     }
-    
+
+    // FIX 3: Helper function to parse price with commas
+    function parsePrice(price) {
+        if (!price) return 0;
+        return parseFloat(String(price).replace(/,/g, '')) || 0;
+    }
+
     // Calculate unit stock from base stock
     function calculateUnitStock(baseStock, conversion, isBaseUnit) {
         if (isNaN(baseStock) || baseStock === null) return 0;
@@ -371,27 +429,19 @@ document.addEventListener('DOMContentLoaded', function() {
         if (isBaseUnit || conversion == 1) return baseStock;
         return baseStock / conversion;
     }
-    
+
     // Update display when unit changes
     function updateUnitAndPrice(productId, baseStock, conversion, unitName, unitPrice, isBaseUnit, baseUnit) {
-        // Calculate unit stock
         let unitStock = calculateUnitStock(parseFloat(baseStock), parseFloat(conversion), isBaseUnit);
         
-        // Format unit stock display
-        let displayValue;
-        if (unitStock >= 1) {
-            displayValue = Math.floor(unitStock);
-        } else {
-            displayValue = unitStock.toFixed(2);
-        }
+        // FIX 4: Always show 2 decimal places for better accuracy
+        let displayValue = unitStock.toFixed(2);
         
-        // Update unit stock display
         const stockSpan = document.getElementById(`unit-stock-${productId}`);
         const labelSpan = document.getElementById(`unit-label-${productId}`);
         
         if (stockSpan) {
             stockSpan.textContent = displayValue;
-            
             if (unitStock <= 0) {
                 stockSpan.className = 'badge unit-stock-badge bg-danger';
             } else if (unitStock <= 10) {
@@ -405,19 +455,18 @@ document.addEventListener('DOMContentLoaded', function() {
             labelSpan.textContent = unitStock === 1 ? unitName : `${unitName}s`;
         }
         
-        // Update price when unit changes
         const priceSpan = document.getElementById(`price-${productId}`);
         const priceUnitLabel = document.getElementById(`price-unit-${productId}`);
         
-        if (priceSpan && unitPrice && !isNaN(unitPrice)) {
-            // Use the price as is from the option's data-price attribute
-            priceSpan.textContent = `UGX ${formatNumber(unitPrice)}`;
+        // FIX 3: Use parsePrice helper
+        if (priceSpan && unitPrice) {
+            const parsedPrice = parsePrice(unitPrice);
+            priceSpan.textContent = `UGX ${formatNumber(parsedPrice)}`;
             if (priceUnitLabel) {
                 priceUnitLabel.textContent = `per ${unitName}`;
             }
         }
         
-        // Update conversion info
         const convInfo = document.getElementById(`conv-${productId}`);
         if (convInfo) {
             if (isBaseUnit) {
@@ -426,11 +475,74 @@ document.addEventListener('DOMContentLoaded', function() {
                 convInfo.innerHTML = `<i class="fas fa-exchange-alt"></i> 1 ${unitName} = ${Math.round(conversion)} ${baseUnit}s`;
             }
         }
-        
-        console.log(`Product ${productId}: Unit=${unitName}, Price=${unitPrice}, Stock=${displayValue} ${unitName}s`);
     }
-    
-    // Initialize all unit selectors
+
+    // ==================== SEARCH & FILTERS ====================
+    const searchBox = document.getElementById('searchBox');
+    const categoryFilter = document.getElementById('categoryFilter');
+    const stockStatusFilter = document.getElementById('stockStatusFilter');
+    const rowCountSpan = document.getElementById('rowCount');
+
+    function filterRows() {
+        const searchTerm = searchBox ? searchBox.value.toLowerCase() : '';
+        const categoryValue = categoryFilter ? categoryFilter.options[categoryFilter.selectedIndex]?.text.toLowerCase() : '';
+        const stockStatus = stockStatusFilter ? stockStatusFilter.value : '';
+        
+        let visibleCount = 0;
+        document.querySelectorAll('#productTable .product-row').forEach(row => {
+            let show = true;
+            
+            // Search filter
+            if (searchTerm) {
+                const productName = row.dataset.productName || '';
+                const productSku = row.dataset.productSku || '';
+                if (!productName.includes(searchTerm) && !productSku.includes(searchTerm)) {
+                    show = false;
+                }
+            }
+            
+            // Category filter
+            if (show && categoryValue && categoryValue !== 'all categories') {
+                const rowCategory = row.querySelector('td:nth-child(3) .category-badge')?.textContent.toLowerCase() || '';
+                if (rowCategory !== categoryValue) {
+                    show = false;
+                }
+            }
+            
+            // Stock status filter
+            if (show && stockStatus) {
+                const rowStatus = row.dataset.status;
+                if (rowStatus !== stockStatus) {
+                    show = false;
+                }
+            }
+            
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+        
+        if (rowCountSpan) rowCountSpan.textContent = visibleCount;
+        
+        // Update statistics based on filtered view
+        updateFilteredStats();
+    }
+
+    function updateFilteredStats() {
+        let inStock = 0, lowStock = 0, outStock = 0;
+        
+        document.querySelectorAll('#productTable .product-row:not([style*="display: none"])').forEach(row => {
+            const status = row.dataset.status;
+            if (status === 'in_stock') inStock++;
+            else if (status === 'low_stock') lowStock++;
+            else if (status === 'out_of_stock') outStock++;
+        });
+        
+        document.getElementById('inStockCount').textContent = inStock;
+        document.getElementById('lowStockCount').textContent = lowStock;
+        document.getElementById('outOfStockCount').textContent = outStock;
+    }
+
+    // Initialize unit selectors
     const unitSelectors = document.querySelectorAll('.unit-selector');
     
     unitSelectors.forEach(selector => {
@@ -441,19 +553,17 @@ document.addEventListener('DOMContentLoaded', function() {
         
         if (isNaN(baseStock)) baseStock = 0;
         
-        // Set initial values
         const initialOption = selector.options[selector.selectedIndex];
         updateUnitAndPrice(
             productId,
             baseStock,
             parseFloat(initialOption.dataset.conversion),
             initialOption.dataset.unitName,
-            parseFloat(initialOption.dataset.price),
+            initialOption.dataset.price,
             initialOption.dataset.isBase === 'true',
             baseUnit
         );
         
-        // Handle change events
         selector.addEventListener('change', function() {
             const selectedOption = this.options[this.selectedIndex];
             updateUnitAndPrice(
@@ -461,13 +571,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 baseStock,
                 parseFloat(selectedOption.dataset.conversion),
                 selectedOption.dataset.unitName,
-                parseFloat(selectedOption.dataset.price),
+                selectedOption.dataset.price,
                 selectedOption.dataset.isBase === 'true',
                 baseUnit
             );
         });
     });
-    
+
     // Delete product confirmation
     document.querySelectorAll('.delete-product').forEach(btn => {
         btn.addEventListener('click', function() {
@@ -478,7 +588,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
-    
+
     // Refresh stock from server
     async function refreshStockData() {
         const btn = document.getElementById('refreshStockBtn');
@@ -499,6 +609,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     row.dataset.baseStock = newBaseStock;
                     
+                    // Update status
+                    let newStatus = 'in_stock';
+                    if (newBaseStock == 0) newStatus = 'out_of_stock';
+                    else if (newBaseStock <= 10) newStatus = 'low_stock';
+                    row.dataset.status = newStatus;
+                    
                     const stockSpan = document.getElementById(`stock-${productId}`);
                     if (stockSpan) {
                         stockSpan.textContent = formatNumber(newBaseStock);
@@ -512,7 +628,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             newBaseStock,
                             parseFloat(selectedOption.dataset.conversion),
                             selectedOption.dataset.unitName,
-                            parseFloat(selectedOption.dataset.price),
+                            selectedOption.dataset.price,
                             selectedOption.dataset.isBase === 'true',
                             row.dataset.baseUnit
                         );
@@ -520,6 +636,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
             
+            filterRows();
             showToast('Stock data refreshed successfully!', 'success');
             
         } catch (error) {
@@ -545,36 +662,46 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => toast.remove(), 3000);
     }
     
+    // Event listeners for filters
+    if (searchBox) searchBox.addEventListener('keyup', filterRows);
+    if (categoryFilter) categoryFilter.addEventListener('change', filterRows);
+    if (stockStatusFilter) stockStatusFilter.addEventListener('change', filterRows);
+    
+    // Refresh button
     const refreshBtn = document.getElementById('refreshStockBtn');
     if (refreshBtn) {
         refreshBtn.addEventListener('click', refreshStockData);
     }
     
-    // Update statistics
-    function updateStats() {
-        let inStock = 0, lowStock = 0, outStock = 0;
+    // Export filtered products
+    document.getElementById('exportFilteredBtn')?.addEventListener('click', function() {
+        const visibleRows = document.querySelectorAll('#productTable .product-row:not([style*="display: none"])');
+        let csv = 'Product,SKU,Category,Price,Stock,Unit Stock,Status\n';
         
-        document.querySelectorAll('.product-row').forEach(row => {
-            const baseStock = parseFloat(row.dataset.baseStock);
-            if (isNaN(baseStock) || baseStock == 0) {
-                outStock++;
-            } else if (baseStock <= 10) {
-                lowStock++;
-            } else {
-                inStock++;
-            }
+        visibleRows.forEach(row => {
+            const productName = row.querySelector('td:first-child a')?.textContent || '';
+            const sku = row.querySelector('.sku-badge')?.textContent || '';
+            const category = row.querySelector('.category-badge')?.textContent || '';
+            const price = row.querySelector('.price-display')?.textContent || '';
+            const stock = row.querySelector('.stock-value')?.textContent || '';
+            const unitStock = row.querySelector('.unit-stock-badge')?.textContent || '';
+            const status = row.querySelector('td:nth-child(8) .badge')?.textContent || '';
+            
+            csv += `"${productName}","${sku}","${category}","${price}","${stock}","${unitStock}","${status}"\n`;
         });
         
-        const inStockEl = document.getElementById('inStockCount');
-        const lowStockEl = document.getElementById('lowStockCount');
-        const outStockEl = document.getElementById('outOfStockCount');
-        
-        if (inStockEl) inStockEl.textContent = inStock;
-        if (lowStockEl) lowStockEl.textContent = lowStock;
-        if (outStockEl) outStockEl.textContent = outStock;
-    }
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `products_export_${new Date().toISOString().slice(0,19)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Export completed!', 'success');
+    });
     
-    updateStats();
+    // Initial filter
+    filterRows();
 });
 </script>
 {% endblock %}
