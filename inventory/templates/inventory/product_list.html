@@ -89,9 +89,18 @@
     <div class="card mb-4">
         <div class="card-header">
             <div class="row">
-                <div class="col-md-4">
-                    <input type="text" id="searchBox" class="form-control" placeholder="Search product by name or SKU...">
-                </div>
+               <div class="col-md-4">
+    <form method="GET" id="searchForm">
+
+        <input type="text"
+               name="q"
+               id="searchBox"
+               class="form-control"
+               value="{{ search_query }}"
+               placeholder="Search product by name or SKU...">
+
+    </form>
+</div> 
                 <div class="col-md-3">
                     <select id="categoryFilter" class="form-select">
                         <option value="">All Categories</option>
@@ -663,7 +672,23 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Event listeners for filters
-    if (searchBox) searchBox.addEventListener('keyup', filterRows);
+   let searchTimer;
+
+if (searchBox) {
+
+    searchBox.addEventListener('keyup', function () {
+
+        clearTimeout(searchTimer);
+
+        searchTimer = setTimeout(() => {
+
+            document.getElementById('searchForm').submit();
+
+        }, 500);
+
+    });
+
+}
     if (categoryFilter) categoryFilter.addEventListener('change', filterRows);
     if (stockStatusFilter) stockStatusFilter.addEventListener('change', filterRows);
     
