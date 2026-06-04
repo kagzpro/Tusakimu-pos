@@ -114,14 +114,12 @@ def product_list(request):
     """Display products with their units of measure"""
     user_locations = get_user_locations(request.user)
     
-    # Base queryset with optimizations - include units
-    products = Product.objects.filter(
-        stocks__location__in=user_locations
-    ).select_related('category').prefetch_related(
+    # FIX: Get ALL products - remove the stocks filter
+    products = Product.objects.all().select_related('category').prefetch_related(
         Prefetch('stocks', 
             queryset=ProductStock.objects.filter(location__in=user_locations).select_related('location')
         ),
-        Prefetch('units',  # Prefetch units for each product
+        Prefetch('units',
             queryset=ProductUnit.objects.all().order_by('quantity_in_base')
         )
     ).distinct()
@@ -142,7 +140,7 @@ def product_list(request):
     
     # Handle sorting
     sort_by = request.GET.get('sort', 'name')
-    if sort_by in ['name', '-name', 'sku', '-sku', 'category__name', '-category__name']:
+    if sort_by in ['name', '-name', 'sku', '-sku', 'category__name', '-category__name', 'selling_price', '-selling_price']:
         products = products.order_by(sort_by)
     else:
         products = products.order_by('name')
@@ -158,7 +156,8 @@ def product_list(request):
     out_of_stock_count = 0
     
     for product in page_obj:
-        stocks = product.stocks.all()  # Already prefetched
+        # Get stocks that the user has access to
+        stocks = product.stocks.filter(location__in=user_locations)
         total_stock = sum(stock.quantity for stock in stocks)
         
         if total_stock == 0:
@@ -166,10 +165,10 @@ def product_list(request):
         elif total_stock <= product.reorder_level:
             low_stock_count += 1
         
-        # Get units for this product with ALL necessary data
+        # Get units for this product
         units = product.units.all()
         
-        # Prepare unit data with all required fields
+        # Prepare unit data
         units_data = []
         for unit in units:
             units_data.append({
@@ -198,7 +197,7 @@ def product_list(request):
             'product': product,
             'stocks': stocks,
             'total_stock': total_stock,
-            'units': units_data,  # Pass the enriched unit data
+            'units': units_data,
             'default_unit': next((u for u in units_data if u['is_default']), units_data[0] if units_data else None)
         })
     
