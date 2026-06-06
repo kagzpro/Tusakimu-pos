@@ -3994,7 +3994,8 @@ def sale_delete(request, pk):
             # Create success message with restoration details
             success_msg = f"Sale {document_number} deleted successfully! {item_count} items removed."
             if restored_items:
-                success_msg += f" Restored: {', '.join([f'{r["quantity"]:.0f} {r["unit"]}s of {r["product"]}' for r in restored_items[:3]])}"
+                items_text = ", ".join([f"{r['quantity']:.0f} {r['unit']}s of {r['product']}" for r in restored_items[:3]])
+success_msg += f" Restored: {items_text}"
                 if len(restored_items) > 3:
                     success_msg += f" and {len(restored_items) - 3} more."
             
