@@ -3932,7 +3932,6 @@ def supplier_delete(request, pk):
 @login_required
 @transaction.atomic
 def sale_delete(request, pk):
-    """Delete a sale and return all items to stock (with unit support)"""
     try:
         sale = get_object_or_404(Sale, id=pk)
         
@@ -3941,26 +3940,17 @@ def sale_delete(request, pk):
             messages.error(request, "You don't have permission to delete this sale")
             return redirect('inventory:sale_list')
         
-        # Check if sale is already reversed
-        if hasattr(sale, 'is_reversed') and sale.is_reversed:
-            messages.error(request, "Cannot delete a reversed sale")
-            return redirect('inventory:sale_detail', sale_id=sale.id)
-        
         if request.method == 'POST':
             document_number = sale.document_number or f"#{sale.id}"
             item_count = sale.items.count()
             restored_items = []
             
-            # Return stock for all items using base_quantity (for unit accuracy)
+            # Return stock for all items
             if sale.document_status != 'draft' and sale.document_type != 'quotation':
                 for item in sale.items.all():
                     if sale.location:
                         try:
-                            # Use base_quantity for accurate stock restoration
-                            # This handles unit conversions correctly (e.g., 2 cartons = 100 pieces)
                             base_qty = item.base_quantity if item.base_quantity else item.quantity
-                            
-                            # Use F() expression for atomic update
                             updated = ProductStock.objects.filter(
                                 product=item.product,
                                 location=sale.location
@@ -3973,7 +3963,7 @@ def sale_delete(request, pk):
                                     'unit': item.product.base_unit
                                 })
                         except ProductStock.DoesNotExist:
-                            # If stock record doesn't exist, create one
+                            base_qty = item.base_quantity if item.base_quantity else item.quantity
                             ProductStock.objects.create(
                                 product=item.product,
                                 location=sale.location,
@@ -3985,24 +3975,22 @@ def sale_delete(request, pk):
                                 'unit': item.product.base_unit
                             })
             
-            # Delete payments first (to avoid orphan records)
+            # Delete payments and sale
             sale.payments.all().delete()
-            
-            # Delete the sale (this will cascade delete items due to CASCADE)
             sale.delete()
             
-            # Create success message with restoration details
+            # Build success message
             success_msg = f"Sale {document_number} deleted successfully! {item_count} items removed."
             if restored_items:
                 items_text = ", ".join([f"{r['quantity']:.0f} {r['unit']}s of {r['product']}" for r in restored_items[:3]])
-success_msg += f" Restored: {items_text}"
+                success_msg += f" Restored: {items_text}"
                 if len(restored_items) > 3:
                     success_msg += f" and {len(restored_items) - 3} more."
             
             messages.success(request, success_msg)
             return redirect('inventory:sale_list')
         
-        # GET request - show confirmation page with items to be restored
+        # GET request - show confirmation page
         items_data = []
         for item in sale.items.all():
             base_qty = item.base_quantity if item.base_quantity else item.quantity
@@ -4027,6 +4015,7 @@ success_msg += f" Restored: {items_text}"
     except Exception as e:
         messages.error(request, f"Error deleting sale: {str(e)}")
         return redirect('inventory:sale_list')
+
 @login_required
 @transaction.atomic
 def sale_edit(request, pk):
