@@ -3932,6 +3932,7 @@ def supplier_delete(request, pk):
 @login_required
 @transaction.atomic
 def sale_delete(request, pk):
+    """Delete a sale and return all items to stock (with unit support)"""
     try:
         sale = get_object_or_404(Sale, id=pk)
         
@@ -3940,35 +3941,83 @@ def sale_delete(request, pk):
             messages.error(request, "You don't have permission to delete this sale")
             return redirect('inventory:sale_list')
         
+        # Check if sale is already reversed
+        if hasattr(sale, 'is_reversed') and sale.is_reversed:
+            messages.error(request, "Cannot delete a reversed sale")
+            return redirect('inventory:sale_detail', sale_id=sale.id)
+        
         if request.method == 'POST':
-            document_number = sale.document_number
+            document_number = sale.document_number or f"#{sale.id}"
             item_count = sale.items.count()
+            restored_items = []
             
-            # Return stock for all items (only if not draft and not quotation)
+            # Return stock for all items using base_quantity (for unit accuracy)
             if sale.document_status != 'draft' and sale.document_type != 'quotation':
                 for item in sale.items.all():
                     if sale.location:
                         try:
+                            # Use base_quantity for accurate stock restoration
+                            # This handles unit conversions correctly (e.g., 2 cartons = 100 pieces)
+                            base_qty = item.base_quantity if item.base_quantity else item.quantity
+                            
                             # Use F() expression for atomic update
-                            ProductStock.objects.filter(
+                            updated = ProductStock.objects.filter(
                                 product=item.product,
                                 location=sale.location
-                            ).update(quantity=F('quantity') + item.quantity)
+                            ).update(quantity=F('quantity') + base_qty)
+                            
+                            if updated:
+                                restored_items.append({
+                                    'product': item.product.name,
+                                    'quantity': base_qty,
+                                    'unit': item.product.base_unit
+                                })
                         except ProductStock.DoesNotExist:
-                            pass
+                            # If stock record doesn't exist, create one
+                            ProductStock.objects.create(
+                                product=item.product,
+                                location=sale.location,
+                                quantity=base_qty
+                            )
+                            restored_items.append({
+                                'product': item.product.name,
+                                'quantity': base_qty,
+                                'unit': item.product.base_unit
+                            })
+            
+            # Delete payments first (to avoid orphan records)
+            sale.payments.all().delete()
             
             # Delete the sale (this will cascade delete items due to CASCADE)
             sale.delete()
             
-            messages.success(
-                request, 
-                f"Sale {document_number} deleted successfully! {item_count} items removed."
-            )
+            # Create success message with restoration details
+            success_msg = f"Sale {document_number} deleted successfully! {item_count} items removed."
+            if restored_items:
+                success_msg += f" Restored: {', '.join([f'{r["quantity"]:.0f} {r["unit"]}s of {r["product"]}' for r in restored_items[:3]])}"
+                if len(restored_items) > 3:
+                    success_msg += f" and {len(restored_items) - 3} more."
+            
+            messages.success(request, success_msg)
             return redirect('inventory:sale_list')
         
-        # GET request - show confirmation page
+        # GET request - show confirmation page with items to be restored
+        items_data = []
+        for item in sale.items.all():
+            base_qty = item.base_quantity if item.base_quantity else item.quantity
+            items_data.append({
+                'product': item.product,
+                'quantity': item.quantity,
+                'unit_name': item.unit_name or item.product.base_unit,
+                'base_quantity': base_qty,
+                'unit_price': item.unit_price,
+                'total': item.total_price
+            })
+        
         return render(request, 'inventory/sale_confirm_delete.html', {
-            'sale': sale
+            'sale': sale,
+            'items': items_data,
+            'will_restore_stock': sale.document_status != 'draft' and sale.document_type != 'quotation',
         })
             
     except Sale.DoesNotExist:
@@ -3977,125 +4026,180 @@ def sale_delete(request, pk):
     except Exception as e:
         messages.error(request, f"Error deleting sale: {str(e)}")
         return redirect('inventory:sale_list')
-
 @login_required
 @transaction.atomic
 def sale_edit(request, pk):
+    """Edit sale with unit of measure support and proper stock adjustment"""
     try:
-        sale = get_object_or_404(Sale, id=pk)
+        sale = get_object_or_404(
+            Sale.objects.prefetch_related('items__product__units', 'payments'),
+            id=pk
+        )
         
         # Check if user can access this sale's location
         if not can_user_access_location(request.user, sale.location):
             messages.error(request, "You don't have permission to edit this sale")
             return redirect('inventory:sale_list')
         
+        # Check if sale is reversed
+        if hasattr(sale, 'is_reversed') and sale.is_reversed:
+            messages.error(request, "Cannot edit a reversed sale")
+            return redirect('inventory:sale_detail', sale_id=sale.id)
+        
         user_locations = get_user_locations(request.user)
         
         if request.method == 'POST':
-            form = SaleForm(request.POST, instance=sale, user=request.user)
-            if form.is_valid():
-                try:
-                    updated_sale = form.save(commit=False)
-                    
-                    # Check if user can access the selected location
-                    if not can_user_access_location(request.user, updated_sale.location):
-                        messages.error(request, "You don't have permission to access this location")
-                        return redirect('inventory:sale_edit', pk=pk)
-                    
-                    # Set document status based on button clicked
+            try:
+                with transaction.atomic():
+                    # Get form data
+                    customer_name = request.POST.get('customer_name', '').strip()
+                    customer_phone = request.POST.get('customer_phone', '')
+                    customer_email = request.POST.get('customer_email', '')
+                    location_id = request.POST.get('location')
+                    notes = request.POST.get('notes', '')
+                    discount_amount = Decimal(request.POST.get('discount_amount', '0')) or Decimal('0')
+                    tax_amount = Decimal(request.POST.get('tax_amount', '0')) or Decimal('0')
                     is_draft = 'save_draft' in request.POST
-                    updated_sale.document_status = 'draft' if is_draft else 'sent'
                     
-                    # Save sale first
-                    updated_sale.save()
+                    # Update location if changed
+                    if location_id and int(location_id) != sale.location.id:
+                        new_location = get_object_or_404(Location, id=location_id)
+                        if not can_user_access_location(request.user, new_location):
+                            messages.error(request, "You don't have permission to access this location")
+                            return redirect('inventory:sale_edit', pk=pk)
+                        sale.location = new_location
                     
-                    # Process sale items from the hidden field
-                    items_data = request.POST.get('items_data', '[]')
-                    items = json.loads(items_data)
+                    # Update sale info
+                    sale.customer_name = customer_name if customer_name else None
+                    sale.customer_phone = customer_phone
+                    sale.customer_email = customer_email
+                    sale.notes = notes
+                    sale.discount_amount = discount_amount
+                    sale.tax_amount = tax_amount
+                    sale.document_status = 'draft' if is_draft else 'sent'
                     
-                    # Return stock from old items
-                    old_items = list(sale.items.all())
-                    for old_item in old_items:
+                    # STEP 1: Return stock from ALL original items (using base_quantity)
+                    for old_item in sale.items.all():
                         if sale.document_status != 'draft' and sale.document_type != 'quotation' and sale.location:
+                            base_qty = old_item.base_quantity if old_item.base_quantity else old_item.quantity
                             try:
                                 ProductStock.objects.filter(
                                     product=old_item.product,
                                     location=sale.location
-                                ).update(quantity=F('quantity') + old_item.quantity)
+                                ).update(quantity=F('quantity') + base_qty)
                             except ProductStock.DoesNotExist:
                                 pass
                     
-                    # Delete old items
+                    # STEP 2: Delete old items
                     sale.items.all().delete()
                     
-                    # Create new items
-                    total_amount = 0
-                    for item in items:
-                        product = get_object_or_404(Product, id=item['product_id'])
-                        quantity = int(item['quantity'])
-                        unit_price = float(item['unit_price'])
-                        item_total = float(item['total'])
+                    # STEP 3: Process new items with unit support
+                    product_ids = request.POST.getlist('product_id[]')
+                    quantities = request.POST.getlist('quantity[]')
+                    unit_names = request.POST.getlist('unit_name[]')
+                    unit_prices = request.POST.getlist('unit_price[]')
+                    
+                    subtotal = Decimal('0')
+                    new_items = []
+                    
+                    for i in range(len(product_ids)):
+                        if not product_ids[i] or not quantities[i]:
+                            continue
                         
-                        # Create sale item
+                        product = get_object_or_404(Product, id=product_ids[i])
+                        quantity = Decimal(quantities[i])
+                        unit_price = Decimal(unit_prices[i]) if unit_prices[i] else Decimal('0')
+                        unit_name = unit_names[i] if i < len(unit_names) else product.base_unit
+                        
+                        # Calculate base quantity (convert to base unit)
+                        base_quantity = quantity
+                        if unit_name and unit_name != product.base_unit:
+                            try:
+                                unit = product.units.get(unit_name=unit_name.lower())
+                                base_quantity = quantity * unit.quantity_in_base
+                            except ProductUnit.DoesNotExist:
+                                base_quantity = quantity
+                        
+                        # Create sale item with unit info
                         sale_item = SaleItem.objects.create(
-                            sale=updated_sale,
+                            sale=sale,
                             product=product,
-                            quantity=quantity,
-                            unit_price=unit_price,
-                            total_price=item_total
+                            quantity=float(quantity),
+                            base_quantity=float(base_quantity),
+                            unit_name=unit_name,
+                            unit_price=float(unit_price),
+                            total_price=float(unit_price * quantity)
                         )
                         
-                        total_amount += item_total
+                        new_items.append(sale_item)
+                        subtotal += unit_price * quantity
                         
-                        # Reduce stock ONLY if not a draft and not a quotation
-                        if not is_draft and updated_sale.document_type != 'quotation' and updated_sale.location:
-                            try:
-                                updated = ProductStock.objects.filter(
-                                    product=product, 
-                                    location=updated_sale.location,
-                                    quantity__gte=quantity
-                                ).update(quantity=F('quantity') - quantity)
-                                
-                                if not updated:
-                                    raise ValueError(f"Not enough stock for {product.name}")
-                                
-                            except ProductStock.DoesNotExist:
-                                raise ValueError(f"No stock found for {product.name} at {updated_sale.location.name}")
+                        # STEP 4: Deduct new stock
+                        if not is_draft and sale.document_type != 'quotation' and sale.location:
+                            stock = ProductStock.objects.filter(
+                                product=product,
+                                location=sale.location
+                            ).first()
+                            
+                            if not stock or stock.quantity < base_quantity:
+                                # Rollback - return stock from already processed items
+                                for processed_item in new_items:
+                                    if processed_item != sale_item:
+                                        ProductStock.objects.filter(
+                                            product=processed_item.product,
+                                            location=sale.location
+                                        ).update(quantity=F('quantity') + processed_item.base_quantity)
+                                raise ValueError(f"Insufficient stock for {product.name}")
+                            
+                            stock.quantity = F('quantity') - base_quantity
+                            stock.save()
                     
-                    # Update sale total amount
-                    updated_sale.total_amount = total_amount
-                    updated_sale.save()
+                    # Update sale totals
+                    sale.subtotal = float(subtotal)
+                    sale.total_amount = float(subtotal + tax_amount - discount_amount)
+                    sale.save()
                     
-                    messages.success(request, f"Sale {updated_sale.document_number} updated successfully!")
-                    return redirect('inventory:sale_list')
+                    messages.success(request, f"Sale {sale.document_number} updated successfully!")
+                    return redirect('inventory:sale_detail', sale_id=sale.id)
                     
-                except Exception as e:
-                    messages.error(request, f"Error updating sale: {str(e)}")
-            else:
-                messages.error(request, "Please correct the errors below.")
-        else:
-            form = SaleForm(instance=sale, user=request.user)
-            # Filter locations to user's accessible ones
-            form.fields['location'].queryset = user_locations
-            
-            # Prepare existing items data for JavaScript
-            existing_items = []
-            for item in sale.items.all():
-                existing_items.append({
-                    'product_id': item.product.id,
-                    'product_name': item.product.name,
-                    'quantity': item.quantity,
-                    'unit_price': str(item.unit_price),
-                    'total': str(item.total_price)
-                })
-
-        return render(request, 'inventory/sale_edit.html', {
+            except Exception as e:
+                messages.error(request, f"Error updating sale: {str(e)}")
+                return redirect('inventory:sale_edit', pk=pk)
+        
+        # GET request - prepare edit form
+        from .forms import SaleForm
+        form = SaleForm(instance=sale, user=request.user)
+        form.fields['location'].queryset = user_locations
+        
+        # Prepare existing items data with unit info
+        existing_items = []
+        for item in sale.items.all():
+            existing_items.append({
+                'id': item.id,
+                'product_id': item.product.id,
+                'product_name': item.product.name,
+                'product_sku': item.product.sku,
+                'quantity': float(item.quantity),
+                'unit_name': item.unit_name or item.product.base_unit,
+                'unit_price': float(item.unit_price),
+                'total': float(item.total_price),
+                'base_quantity': float(item.base_quantity if item.base_quantity else item.quantity)
+            })
+        
+        # Get products with units for the form
+        products = Product.objects.all().select_related('category').prefetch_related('units')
+        
+        context = {
             'form': form,
             'sale': sale,
+            'items': sale.items.all(),
+            'existing_items_json': json.dumps(existing_items),
+            'products': products,
             'document_types': DocumentType.choices,
             'currencies': Currency.choices,
-            'existing_items': json.dumps(existing_items) if 'existing_items' in locals() else '[]'
-        })
+            'locations': user_locations,
+        }
+        return render(request, 'inventory/sale_edit.html', context)
             
     except Sale.DoesNotExist:
         messages.error(request, "Sale not found")
@@ -4103,7 +4207,6 @@ def sale_edit(request, pk):
     except Exception as e:
         messages.error(request, f"Error loading sale edit: {str(e)}")
         return redirect('inventory:sale_list')
-
 # =======================
 # PAYMENT EDIT
 # =======================
