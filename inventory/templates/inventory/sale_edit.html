@@ -7,9 +7,11 @@
 <div class="container-fluid">
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
         <h1 class="h3 mb-0 text-gray-800">Edit Sale: {{ sale.document_number }}</h1>
-        <a href="{% url 'inventory:sale_list' %}" class="btn btn-secondary">
-            <i class="fas fa-arrow-left fa-sm"></i> Back to Sales
-        </a>
+        <div>
+            <a href="{% url 'inventory:sale_list' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left fa-sm"></i> Back to Sales
+            </a>
+        </div>
     </div>
 
     <div class="row">
@@ -23,16 +25,25 @@
                         {% csrf_token %}
                         
                         <div class="row">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <div class="form-group">
-                                    <label for="{{ form.customer.id_for_label }}">Customer</label>
-                                    {{ form.customer }}
+                                    <label>Customer Name</label>
+                                    <input type="text" name="customer_name" class="form-control" 
+                                           value="{{ sale.customer_name|default:'' }}" placeholder="Walk-in Customer">
                                 </div>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <div class="form-group">
-                                    <label for="{{ form.location.id_for_label }}">Location *</label>
-                                    {{ form.location }}
+                                    <label>Customer Phone</label>
+                                    <input type="text" name="customer_phone" class="form-control" 
+                                           value="{{ sale.customer_phone|default:'' }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Customer Email</label>
+                                    <input type="email" name="customer_email" class="form-control" 
+                                           value="{{ sale.customer_email|default:'' }}">
                                 </div>
                             </div>
                         </div>
@@ -40,27 +51,55 @@
                         <div class="row">
                             <div class="col-md-4">
                                 <div class="form-group">
-                                    <label for="{{ form.document_type.id_for_label }}">Document Type</label>
-                                    {{ form.document_type }}
+                                    <label>Location *</label>
+                                    <select name="location_id" class="form-control" required>
+                                        {% for location in locations %}
+                                        <option value="{{ location.id }}" {% if sale.location.id == location.id %}selected{% endif %}>
+                                            {{ location.name }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="form-group">
-                                    <label for="{{ form.currency.id_for_label }}">Currency</label>
-                                    {{ form.currency }}
+                                    <label>Document Type</label>
+                                    <select name="document_type" class="form-control">
+                                        <option value="invoice" {% if sale.document_type == 'invoice' %}selected{% endif %}>Invoice</option>
+                                        <option value="receipt" {% if sale.document_type == 'receipt' %}selected{% endif %}>Receipt</option>
+                                        <option value="quotation" {% if sale.document_type == 'quotation' %}selected{% endif %}>Quotation</option>
+                                    </select>
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="form-group">
-                                    <label for="{{ form.due_date.id_for_label }}">Due Date</label>
-                                    {{ form.due_date }}
+                                    <label>Sale Date</label>
+                                    <input type="datetime-local" name="sale_date" class="form-control" 
+                                           value="{{ sale.date|date:'Y-m-d\\TH:i' }}">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Discount Amount (UGX)</label>
+                                    <input type="number" step="1000" name="discount_amount" class="form-control" 
+                                           value="{{ sale.discount_amount|default:0 }}" id="discountAmount">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Tax Amount (UGX)</label>
+                                    <input type="number" step="100" name="tax_amount" class="form-control" 
+                                           value="{{ sale.tax_amount|default:0 }}" id="taxAmount">
                                 </div>
                             </div>
                         </div>
                         
                         <div class="form-group">
-                            <label for="{{ form.notes.id_for_label }}">Notes</label>
-                            {{ form.notes }}
+                            <label>Notes</label>
+                            <textarea name="notes" class="form-control" rows="2">{{ sale.notes|default:'' }}</textarea>
                         </div>
                         
                         <hr>
@@ -68,22 +107,38 @@
                         <h5>Sale Items</h5>
                         <div class="table-responsive">
                             <table class="table table-bordered" id="itemsTable">
-                                <thead>
+                                <thead class="table-light">
                                     <tr>
-                                        <th>Product</th>
-                                        <th>Quantity</th>
-                                        <th>Unit Price</th>
-                                        <th>Total</th>
-                                        <th>Action</th>
+                                        <th style="width: 35%">Product</th>
+                                        <th style="width: 20%">Unit</th>
+                                        <th style="width: 15%">Quantity</th>
+                                        <th style="width: 20%">Unit Price (UGX)</th>
+                                        <th style="width: 15%">Total (UGX)</th>
+                                        <th style="width: 10%">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="itemsTableBody">
-                                    <!-- Items will be added dynamically -->
+                                    <!-- Items will be populated by JavaScript -->
                                 </tbody>
-                                <tfoot>
+                                <tfoot class="table-light">
+                                    <tr class="table-active">
+                                        <td colspan="4" class="text-end fw-bold">Subtotal:</td>
+                                        <td class="fw-bold" id="subtotal">UGX 0</td>
+                                        <td></td>
+                                    </tr>
                                     <tr>
-                                        <td colspan="3" class="text-right"><strong>Grand Total:</strong></td>
-                                        <td id="grandTotal">0.00</td>
+                                        <td colspan="4" class="text-end">Discount:</td>
+                                        <td id="discountDisplay">UGX 0</td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td colspan="4" class="text-end">Tax:</td>
+                                        <td id="taxDisplay">UGX 0</td>
+                                        <td></td>
+                                    </tr>
+                                    <tr class="table-success">
+                                        <td colspan="4" class="text-end fw-bold">Grand Total:</td>
+                                        <td class="fw-bold text-success" id="grandTotal">UGX 0</td>
                                         <td></td>
                                     </tr>
                                 </tfoot>
@@ -96,8 +151,22 @@
                             </button>
                         </div>
                         
+                        <!-- Product search for adding items -->
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="productSearch" 
+                                           placeholder="Search product by name or SKU...">
+                                    <button class="btn btn-outline-primary" type="button" id="searchProductBtn">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </div>
+                                <div id="productSearchResults" class="list-group mt-2" style="display: none;"></div>
+                            </div>
+                        </div>
+                        
                         <!-- Hidden field to store items data -->
-                        <input type="hidden" name="items_data" id="itemsData" value='{{ existing_items }}'>
+                        <input type="hidden" name="items_data" id="itemsData" value="">
                         
                         <div class="form-group mt-4">
                             <button type="submit" name="save_draft" class="btn btn-warning">
@@ -114,12 +183,443 @@
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block extra_js %}
+<style>
+.table-responsive {
+    max-height: 500px;
+    overflow-y: auto;
+}
+.item-row {
+    transition: background-color 0.2s;
+}
+.item-row:hover {
+    background-color: #f8f9fa;
+}
+.unit-select {
+    min-width: 120px;
+}
+.quantity-input, .price-input {
+    text-align: right;
+}
+#productSearchResults {
+    position: absolute;
+    z-index: 1000;
+    width: 100%;
+    max-height: 300px;
+    overflow-y: auto;
+}
+.search-result-item {
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.search-result-item:hover {
+    background-color: #e9ecef;
+}
+</style>
+
 <script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Products data for unit selection
+    let productsData = {};
+    
+    // Current items array
+    let items = [];
+    
+    // Load existing items from server
+    const existingItemsJson = '{{ existing_items_json|safe }}';
+    if (existingItemsJson && existingItemsJson !== '[]') {
+        try {
+            items = JSON.parse(existingItemsJson);
+            renderItemsTable();
+        } catch(e) {
+            console.error('Error parsing existing items:', e);
+        }
+    }
+    
+    // Function to fetch product units
+    async function fetchProductUnits(productId) {
+        if (productsData[productId]) {
+            return productsData[productId];
+        }
+        
+        try {
+            const response = await fetch(`/inventory/api/product-units/${productId}/`);
+            const data = await response.json();
+            productsData[productId] = data;
+            return data;
+        } catch (error) {
+            console.error('Error fetching product units:', error);
+            return null;
+        }
+    }
+    
+    // Function to add item to table
+    window.addItemToSale = async function(productId, productName, productSku, unitId, unitName, unitPrice, quantity = 1) {
+        // Fetch units if needed
+        let productData = productsData[productId];
+        if (!productData) {
+            productData = await fetchProductUnits(productId);
+        }
+        
+        if (!productData) {
+            showNotification('Could not load product information', 'danger');
+            return;
+        }
+        
+        // Get unit details
+        let selectedUnit = null;
+        if (unitId) {
+            selectedUnit = productData.units.find(u => u.id == unitId);
+        } else {
+            selectedUnit = productData.units.find(u => u.is_default) || productData.units[0];
+        }
+        
+        if (!selectedUnit) {
+            showNotification('No unit available for this product', 'danger');
+            return;
+        }
+        
+        const itemTotal = quantity * (selectedUnit.selling_price || unitPrice);
+        
+        // Check if product already exists in items
+        const existingIndex = items.findIndex(item => item.product_id == productId && item.unit_id == selectedUnit.id);
+        
+        if (existingIndex >= 0) {
+            // Update existing item
+            items[existingIndex].quantity += quantity;
+            items[existingIndex].total = items[existingIndex].quantity * items[existingIndex].unit_price;
+        } else {
+            // Add new item
+            items.push({
+                id: null,
+                product_id: productId,
+                product_name: productName,
+                product_sku: productSku,
+                unit_id: selectedUnit.id,
+                unit_name: selectedUnit.name,
+                unit_price: selectedUnit.selling_price,
+                quantity: quantity,
+                total: itemTotal,
+                base_quantity: quantity * selectedUnit.quantity_in_base
+            });
+        }
+        
+        renderItemsTable();
+        updateTotals();
+        showNotification(`${productName} added successfully`, 'success');
+    };
+    
+    // Render items table
+    function renderItemsTable() {
+        const tbody = document.getElementById('itemsTableBody');
+        if (!tbody) return;
+        
+        if (items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No items added. Search and add products above.</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = '';
+        items.forEach((item, index) => {
+            const row = tbody.insertRow();
+            row.className = 'item-row';
+            
+            // Product name cell
+            const productCell = row.insertCell(0);
+            productCell.innerHTML = `
+                <strong>${escapeHtml(item.product_name)}</strong>
+                <br>
+                <small class="text-muted">SKU: ${escapeHtml(item.product_sku)}</small>
+                <input type="hidden" name="product_id[]" value="${item.product_id}">
+            `;
+            
+            // Unit selector cell
+            const unitCell = row.insertCell(1);
+            unitCell.innerHTML = `
+                <select class="form-select form-select-sm unit-select" data-index="${index}">
+                    <option value="">Loading units...</option>
+                </select>
+            `;
+            
+            // Quantity cell
+            const qtyCell = row.insertCell(2);
+            qtyCell.innerHTML = `
+                <input type="number" class="form-control form-control-sm quantity-input" 
+                       value="${item.quantity}" step="1" min="1" data-index="${index}">
+            `;
+            
+            // Price cell
+            const priceCell = row.insertCell(3);
+            priceCell.innerHTML = `
+                <input type="number" class="form-control form-control-sm price-input" 
+                       value="${item.unit_price}" step="100" data-index="${index}">
+            `;
+            
+            // Total cell
+            const totalCell = row.insertCell(4);
+            totalCell.className = 'text-end fw-bold';
+            totalCell.innerHTML = `UGX ${formatNumber(item.total)}`;
+            
+            // Action cell
+            const actionCell = row.insertCell(5);
+            actionCell.className = 'text-center';
+            actionCell.innerHTML = `
+                <button type="button" class="btn btn-danger btn-sm remove-item" data-index="${index}">
+                    <i class="fas fa-trash"></i>
+                </button>
+            `;
+            
+            // Populate unit selector
+            populateUnitSelector(row.querySelector('.unit-select'), item.product_id, item.unit_id);
+        });
+        
+        // Add event listeners
+        attachItemEvents();
+    }
+    
+    // Populate unit selector
+    async function populateUnitSelector(selectElement, productId, selectedUnitId) {
+        const productData = await fetchProductUnits(productId);
+        if (!productData || !productData.units) {
+            selectElement.innerHTML = '<option value="">No units available</option>';
+            return;
+        }
+        
+        let options = '';
+        for (const unit of productData.units) {
+            const selected = (selectedUnitId && unit.id == selectedUnitId) ? 'selected' : '';
+            options += `<option value="${unit.id}" data-price="${unit.selling_price}" data-conversion="${unit.quantity_in_base}">
+                ${unit.name} (1 = ${unit.quantity_in_base} ${productData.base_unit}s) - UGX ${formatNumber(unit.selling_price)}
+            </option>`;
+        }
+        selectElement.innerHTML = options;
+    }
+    
+    // Attach event listeners to item rows
+    function attachItemEvents() {
+        // Unit change events
+        document.querySelectorAll('.unit-select').forEach(select => {
+            select.removeEventListener('change', handleUnitChange);
+            select.addEventListener('change', handleUnitChange);
+        });
+        
+        // Quantity change events
+        document.querySelectorAll('.quantity-input').forEach(input => {
+            input.removeEventListener('input', handleQuantityChange);
+            input.addEventListener('input', handleQuantityChange);
+        });
+        
+        // Price change events
+        document.querySelectorAll('.price-input').forEach(input => {
+            input.removeEventListener('input', handlePriceChange);
+            input.addEventListener('input', handlePriceChange);
+        });
+        
+        // Remove button events
+        document.querySelectorAll('.remove-item').forEach(btn => {
+            btn.removeEventListener('click', handleRemoveItem);
+            btn.addEventListener('click', handleRemoveItem);
+        });
+    }
+    
+    function handleUnitChange(e) {
+        const index = parseInt(e.target.dataset.index);
+        const selectedOption = e.target.options[e.target.selectedIndex];
+        const unitPrice = parseFloat(selectedOption.dataset.price);
+        
+        if (items[index]) {
+            items[index].unit_id = parseInt(e.target.value);
+            items[index].unit_price = unitPrice;
+            items[index].total = items[index].quantity * unitPrice;
+            renderItemsTable();
+            updateTotals();
+        }
+    }
+    
+    function handleQuantityChange(e) {
+        const index = parseInt(e.target.dataset.index);
+        const newQuantity = parseFloat(e.target.value) || 0;
+        
+        if (items[index] && newQuantity > 0) {
+            items[index].quantity = newQuantity;
+            items[index].total = newQuantity * items[index].unit_price;
+            renderItemsTable();
+            updateTotals();
+        }
+    }
+    
+    function handlePriceChange(e) {
+        const index = parseInt(e.target.dataset.index);
+        const newPrice = parseFloat(e.target.value) || 0;
+        
+        if (items[index] && newPrice > 0) {
+            items[index].unit_price = newPrice;
+            items[index].total = items[index].quantity * newPrice;
+            renderItemsTable();
+            updateTotals();
+        }
+    }
+    
+    function handleRemoveItem(e) {
+        const index = parseInt(e.target.closest('.remove-item').dataset.index);
+        items.splice(index, 1);
+        renderItemsTable();
+        updateTotals();
+    }
+    
+    function updateTotals() {
+        const subtotal = items.reduce((sum, item) => sum + item.total, 0);
+        const discount = parseFloat(document.getElementById('discountAmount')?.value) || 0;
+        const tax = parseFloat(document.getElementById('taxAmount')?.value) || 0;
+        const grandTotal = subtotal + tax - discount;
+        
+        document.getElementById('subtotal').innerHTML = `UGX ${formatNumber(subtotal)}`;
+        document.getElementById('discountDisplay').innerHTML = `UGX ${formatNumber(discount)}`;
+        document.getElementById('taxDisplay').innerHTML = `UGX ${formatNumber(tax)}`;
+        document.getElementById('grandTotal').innerHTML = `UGX ${formatNumber(grandTotal)}`;
+        
+        // Update hidden items data
+        document.getElementById('itemsData').value = JSON.stringify(items);
+    }
+    
+    // Product search functionality
+    const productSearch = document.getElementById('productSearch');
+    const searchProductBtn = document.getElementById('searchProductBtn');
+    const searchResults = document.getElementById('productSearchResults');
+    
+    async function searchProducts() {
+        const query = productSearch.value.trim();
+        if (query.length < 2) {
+            searchResults.style.display = 'none';
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/inventory/api/products/?search=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            
+            if (data.products && data.products.length > 0) {
+                displaySearchResults(data.products);
+                searchResults.style.display = 'block';
+            } else {
+                searchResults.innerHTML = '<div class="list-group-item text-muted">No products found</div>';
+                searchResults.style.display = 'block';
+            }
+        } catch (error) {
+            console.error('Search error:', error);
+            searchResults.innerHTML = '<div class="list-group-item text-danger">Error searching products</div>';
+            searchResults.style.display = 'block';
+        }
+    }
+    
+    function displaySearchResults(products) {
+        let html = '';
+        products.forEach(product => {
+            html += `
+                <div class="list-group-item list-group-item-action search-result-item" 
+                     data-product-id="${product.id}"
+                     data-product-name="${escapeHtml(product.name)}"
+                     data-product-sku="${escapeHtml(product.sku)}">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>${escapeHtml(product.name)}</strong>
+                            <br>
+                            <small class="text-muted">SKU: ${escapeHtml(product.sku)} | Stock: ${product.stock || 0} ${product.base_unit}</small>
+                        </div>
+                        <div>
+                            <span class="badge bg-primary">UGX ${formatNumber(product.selling_price)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        searchResults.innerHTML = html;
+        
+        // Add click handlers
+        document.querySelectorAll('.search-result-item').forEach(item => {
+            item.addEventListener('click', async function() {
+                const productId = this.dataset.productId;
+                const productName = this.dataset.productName;
+                const productSku = this.dataset.productSku;
+                
+                const productData = await fetchProductUnits(productId);
+                if (productData && productData.units && productData.units.length > 0) {
+                    const defaultUnit = productData.units.find(u => u.is_default) || productData.units[0];
+                    addItemToSale(productId, productName, productSku, defaultUnit.id, defaultUnit.name, defaultUnit.selling_price, 1);
+                }
+                
+                productSearch.value = '';
+                searchResults.style.display = 'none';
+            });
+        });
+    }
+    
+    productSearch.addEventListener('keyup', function(e) {
+        if (e.key === 'Enter') {
+            searchProducts();
+        } else {
+            setTimeout(searchProducts, 500);
+        }
+    });
+    
+    searchProductBtn.addEventListener('click', searchProducts);
+    
+    // Hide results when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!productSearch.contains(e.target) && !searchResults.contains(e.target)) {
+            searchResults.style.display = 'none';
+        }
+    });
+    
+    // Discount and tax change handlers
+    const discountInput = document.getElementById('discountAmount');
+    const taxInput = document.getElementById('taxAmount');
+    if (discountInput) discountInput.addEventListener('input', updateTotals);
+    if (taxInput) taxInput.addEventListener('input', updateTotals);
+    
+    // Form submission
+    const saleForm = document.getElementById('saleForm');
+    saleForm.addEventListener('submit', function(e) {
+        if (items.length === 0) {
+            e.preventDefault();
+            showNotification('Please add at least one item to the sale', 'danger');
+            return false;
+        }
+        document.getElementById('itemsData').value = JSON.stringify(items);
+    });
+    
+    // Helper functions
+    function formatNumber(value) {
+        let num = parseFloat(value);
+        if (isNaN(num)) return '0';
+        return num.toLocaleString('en-US');
+    }
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    function showNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 end-0 m-3`;
+        notification.style.zIndex = '9999';
+        notification.style.minWidth = '300px';
+        notification.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+    
     // Initialize with existing items
-    const existingItems = JSON.parse('{{ existing_items|escapejs }}');
+    if (items.length > 0) {
+        renderItemsTable();
+        updateTotals();
+    }
+});
 </script>
-<script src="{% static 'js/sale_form.js' %}"></script>
 {% endblock %}
