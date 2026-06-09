@@ -1,4 +1,4 @@
-﻿from django.db import models
+from django.db import models
 from django.db.models import Sum
 from django.contrib.auth.models import User
 from core.models import Location
@@ -416,7 +416,6 @@ class RetailSale(models.Model):
         super().save(*args, **kwargs)
 
 # ==================== SALE ====================
-
 class Sale(models.Model):
     DOCUMENT_STATUS = [
         ('draft', 'Draft'),
@@ -427,6 +426,11 @@ class Sale(models.Model):
     ]
     
     customer = models.ForeignKey('transactions.Customer', on_delete=models.SET_NULL, null=True, blank=True)
+    # Add these fields for customer name/phone when customer is not in database
+    customer_name = models.CharField(max_length=200, blank=True, help_text="Customer name for walk-in customers")
+    customer_phone = models.CharField(max_length=20, blank=True, help_text="Customer phone for walk-in customers")
+    customer_balance_at_sale = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Customer's balance at the time of sale")
+    
     location = models.ForeignKey('core.Location', on_delete=models.SET_NULL, null=True)
     date = models.DateTimeField(default=timezone.now)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -469,12 +473,17 @@ class Sale(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        customer_name = self.customer.name if self.customer else 'Walk-in'
-        return f"{self.document_number} - {customer_name} - UGX {self.total_amount}"
+        display_name = self.customer_name if self.customer_name else (self.customer.name if self.customer else 'Walk-in')
+        return f"{self.document_number} - {display_name} - UGX {self.total_amount:,.0f}"
 
     @property
     def balance_due(self):
         return self.total_amount - self.paid_amount
+
+    @property
+    def total_due_with_balance(self):
+        """Total amount due including customer's previous balance"""
+        return self.total_amount + self.customer_balance_at_sale - self.paid_amount
 
     @property
     def is_overdue(self):
@@ -500,12 +509,20 @@ class Sale(models.Model):
         elif self.paid_amount > 0 and self.document_status == 'draft':
             self.document_status = 'sent'
         self.save()
+    
+    def get_customer_display_name(self):
+        """Get customer name for display"""
+        if self.customer_name:
+            return self.customer_name
+        elif self.customer:
+            return self.customer.name
+        return 'Walk-in Customer'
 
 class SaleItem(models.Model):
     sale = models.ForeignKey(Sale, related_name='items', on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.DecimalField(max_digits=10, decimal_places=2)
-    unit_id = models.IntegerField(null=True, blank=True, help_text="ID of the unit used for this sale")
+    unit = models.ForeignKey('ProductUnit', on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items')
     unit_name = models.CharField(max_length=50, blank=True, help_text="Name of unit (carton, packet, piece)")
     base_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Quantity in base units")
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -537,7 +554,26 @@ class SaleItem(models.Model):
 
     def __str__(self):
         unit_display = f" ({self.unit_name})" if self.unit_name else ""
-        return f"{self.product.name} - {self.quantity}{unit_display} x UGX {self.unit_price}"
+        return f"{self.product.name} - {self.quantity}{unit_display} x UGX {self.unit_price:,.0f}"
+    
+    @property
+    def get_unit(self):
+        """Get the product unit object"""
+        if self.unit_id:
+            try:
+                return ProductUnit.objects.get(id=self.unit_id)
+            except ProductUnit.DoesNotExist:
+                pass
+        return None
+    
+    @property
+    def conversion_text(self):
+        """Get conversion text for display"""
+        if self.unit_name and self.unit_name != self.product.base_unit:
+            unit = self.get_unit()
+            if unit:
+                return f"1 {self.unit_name} = {unit.quantity_in_base} {self.product.base_unit}s"
+        return f"Base unit: {self.product.base_unit}"
 
 # ==================== PAYMENT ====================
 
