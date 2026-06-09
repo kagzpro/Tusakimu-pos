@@ -144,6 +144,8 @@ path('reports/export-transfer/<str:report_type>/', views.export_transfer_report,
 path('products/<int:product_id>/movement-report/', views.product_movement_report, name='product_movement_report'),
 path('products/<int:product_id>/movement-export/', views.product_movement_export, name='product_movement_export'),
 
+    # ... your existing URLs ...
+    path('api/customer-balance/', views.get_customer_balance_api, name='get_customer_balance_api'),
     # Search and API
     path('search_product/', views.search_product, name='search_product'),
     path('api/products/', views.product_search_api, name='product_search_api'),
