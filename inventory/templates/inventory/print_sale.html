@@ -208,6 +208,14 @@
                 margin-top: 2px;
             }
             
+            .customer-balance-row {
+                background-color: #f0f0f0;
+                padding: 4px 0;
+                margin: 4px 0;
+                border-left: 3px solid #dc3545;
+                padding-left: 5px;
+            }
+            
             /* Footer - BOLD */
             .receipt-footer {
                 text-align: center;
@@ -312,6 +320,14 @@
             .btn-info { background: #17a2b8; color: white; }
             
             .thermal-only, .a4-only { display: inline-block; }
+            
+            .customer-balance-warning {
+                background: #fff3cd;
+                border: 1px solid #ffc107;
+                border-radius: 4px;
+                padding: 8px;
+                margin-bottom: 10px;
+            }
         }
     </style>
 </head>
@@ -350,11 +366,24 @@
                 <span><strong>Cashier:</strong> {{ sale.created_by.username|truncatechars:15 }}</span>
             </div>
             <div class="info-row">
-                <span><strong>Customer:</strong> {% if sale.customer %}{{ sale.customer.name|truncatechars:20 }}{% else %}Walk-in{% endif %}</span>
+                <span><strong>Customer:</strong> {% if sale.customer %}{{ sale.customer.name|truncatechars:20 }}{% elif sale.customer_name %}{{ sale.customer_name|truncatechars:20 }}{% else %}Walk-in{% endif %}</span>
                 {% if sale.customer and sale.customer.phone %}
                 <span>{{ sale.customer.phone }}</span>
+                {% elif sale.customer_phone %}
+                <span>{{ sale.customer_phone }}</span>
                 {% endif %}
             </div>
+            
+            <!-- CUSTOMER BALANCE DISPLAY (if any) -->
+            {% if sale.customer_balance_at_sale > 0 %}
+            <div class="customer-balance-row">
+                <div class="info-row">
+                    <span><strong>PREVIOUS BALANCE:</strong></span>
+                    <span><strong style="color: #dc3545;">UGX {{ sale.customer_balance_at_sale|floatformat:0 }}</strong></span>
+                </div>
+            </div>
+            {% endif %}
+            
             <div class="dashed-divider"></div>
 
             <!-- Items Table - SEPARATED COLUMNS WITH LINES -->
@@ -394,11 +423,22 @@
 
             <div class="dashed-divider"></div>
 
-            <!-- Totals - LARGER SPACE -->
+            <!-- Current Bill Total -->
             <div class="total-row">
-                <span><strong>TOTAL</strong></span>
+                <span><strong>CURRENT BILL</strong></span>
                 <span class="amount-large"><strong>UGX {{ sale.total_amount|floatformat:0 }}</strong></span>
             </div>
+            
+            <!-- Total Due (including previous balance) -->
+            {% if sale.customer_balance_at_sale > 0 %}
+            <div class="total-row" style="background-color: #f0f0f0; border-top: 2px solid #dc3545;">
+                <span><strong>TOTAL DUE</strong></span>
+                <span class="amount-large" style="color: #dc3545;"><strong>UGX {{ sale.total_amount|add:sale.customer_balance_at_sale|floatformat:0 }}</strong></span>
+            </div>
+            <div class="info-row" style="font-size: 8pt;">
+                <span>⚠️ Includes previous balance</span>
+            </div>
+            {% endif %}
 
             <!-- Payment Section -->
             <div class="payment-summary">
@@ -422,24 +462,26 @@
                     {% endfor %}
                     <div class="dashed-divider"></div>
                     <div class="total-row">
-                        <span><strong>PAID</strong></span>
+                        <span><strong>TOTAL PAID</strong></span>
                         <span><strong>UGX {{ sale.paid_amount|floatformat:0 }}</strong></span>
                     </div>
                 {% else %}
                     <div class="info-row"><strong>NOT PAID</strong></div>
                 {% endif %}
                 
+                <!-- Balance Due after payment -->
                 {% if sale.balance_due > 0 %}
                 <div class="total-row balance-row">
-                    <span><strong>BALANCE DUE</strong></span>
+                    <span><strong>REMAINING BALANCE</strong></span>
                     <span><strong>UGX {{ sale.balance_due|floatformat:0 }}</strong></span>
                 </div>
                 {% endif %}
                 
+                <!-- Change if overpaid -->
                 {% if sale.paid_amount > sale.total_amount %}
                 <div class="total-row balance-row">
                     <span><strong>CHANGE</strong></span>
-                    <span><strong>UGX {{ sale.paid_amount|add:"0"|floatformat:0 }}</strong></span>
+                    <span><strong>UGX {{ sale.paid_amount|add:sale.customer_balance_at_sale|floatformat:0 }}</strong></span>
                 </div>
                 {% endif %}
             </div>
@@ -452,6 +494,9 @@
                 <div class="footer-text"><strong>{{ company.name|truncatechars:25 }}</strong></div>
                 <div class="footer-text">Powered by Tusakimu ERP</div>
                 <div class="footer-text">{{ sale.created_at|date:"d/m/Y H:i:s" }}</div>
+                {% if sale.customer_balance_at_sale > 0 %}
+                <div class="footer-text" style="color: #dc3545;">Previous balance: UGX {{ sale.customer_balance_at_sale|floatformat:0 }}</div>
+                {% endif %}
             </div>
             
             <!-- Barcode -->
@@ -483,11 +528,24 @@
                 <span><strong>Cashier:</strong> {{ sale.created_by.get_full_name|default:sale.created_by.username }}</span>
             </div>
             <div class="info-row">
-                <span><strong>Customer:</strong> {% if sale.customer %}{{ sale.customer.name }}{% else %}Walk-in Customer{% endif %}</span>
+                <span><strong>Customer:</strong> {% if sale.customer %}{{ sale.customer.name }}{% elif sale.customer_name %}{{ sale.customer_name }}{% else %}Walk-in Customer{% endif %}</span>
                 {% if sale.customer and sale.customer.phone %}
                 <span><strong>Tel:</strong> {{ sale.customer.phone }}</span>
+                {% elif sale.customer_phone %}
+                <span><strong>Tel:</strong> {{ sale.customer_phone }}</span>
                 {% endif %}
             </div>
+            
+            <!-- CUSTOMER BALANCE DISPLAY (A4) -->
+            {% if sale.customer_balance_at_sale > 0 %}
+            <div class="customer-balance-warning">
+                <div class="info-row">
+                    <span><strong>⚠️ Previous Balance:</strong></span>
+                    <span><strong>UGX {{ sale.customer_balance_at_sale|floatformat:0 }}</strong></span>
+                </div>
+            </div>
+            {% endif %}
+            
             <div class="divider"></div>
 
             <table class="items-table">
@@ -504,7 +562,7 @@
                     <tr>
                         <td class="item-name">
                             <strong>{{ item.product.name }}</strong>
-                            {% if item.unit_name %}<br><strong>({{ item.unit_name|upper }})</strong>{% endif %}
+                            {% if item.unit_name %}<br><small>({{ item.unit_name|upper }})</small>{% endif %}
                         </td>
                         <td class="item-qty"><strong>{{ item.quantity|floatformat:0 }}</strong></td>
                         <td class="item-price"><strong>{{ item.unit_price|floatformat:0 }}</strong></td>
@@ -516,11 +574,25 @@
 
             <div class="divider"></div>
 
+            <!-- Current Bill -->
             <div class="total-row">
-                <span><strong>TOTAL</strong></span>
-                <span class="amount-large"><strong>UGX {{ sale.total_amount|floatformat:0 }}</strong></span>
+                <span><strong>Current Bill</strong></span>
+                <span><strong>UGX {{ sale.total_amount|floatformat:0 }}</strong></span>
             </div>
+            
+            <!-- Total Due with Balance -->
+            {% if sale.customer_balance_at_sale > 0 %}
+            <div class="total-row" style="background-color: #fff3cd; border-top: 2px solid #ffc107;">
+                <span><strong>Previous Balance</strong></span>
+                <span><strong>UGX {{ sale.customer_balance_at_sale|floatformat:0 }}</strong></span>
+            </div>
+            <div class="total-row" style="border-top: 2px solid #dc3545;">
+                <span><strong>TOTAL DUE</strong></span>
+                <span><strong>UGX {{ sale.total_amount|add:sale.customer_balance_at_sale|floatformat:0 }}</strong></span>
+            </div>
+            {% endif %}
 
+            <!-- Payment Details -->
             <div class="payment-summary">
                 <div><strong>Payment Details:</strong></div>
                 {% if sale.payments.exists %}
@@ -540,7 +612,7 @@
                     {% endfor %}
                     <div class="divider"></div>
                     <div class="total-row">
-                        <span><strong>Paid:</strong></span>
+                        <span><strong>Total Paid:</strong></span>
                         <span><strong>UGX {{ sale.paid_amount|floatformat:0 }}</strong></span>
                     </div>
                 {% else %}
@@ -560,6 +632,9 @@
                 <div>Powered by Tusakimu ERP</div>
                 <div>Cashier: {{ sale.created_by.get_full_name|default:sale.created_by.username }}</div>
                 <div>Printed: {% now "d/m/Y H:i:s" %}</div>
+                {% if sale.customer_balance_at_sale > 0 %}
+                <div style="color: #dc3545; margin-top: 5px;">⚠️ Customer has previous balance of UGX {{ sale.customer_balance_at_sale|floatformat:0 }}</div>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -595,6 +670,7 @@
                 .items-table .item-price { width: 18%; text-align: right; font-weight: 700; }
                 .items-table .item-total { width: 30%; text-align: right; font-weight: 800; border-left: 1px solid #000; }
                 .item-detail { font-size: 8pt; font-weight: 600; margin-top: 2px; }
+                .customer-balance-row { background-color: #f0f0f0; padding: 4px 0; margin: 4px 0; border-left: 3px solid #dc3545; padding-left: 5px; }
                 .payment-method-item { display: flex; justify-content: space-between; padding: 3px 0; font-size: 10pt; font-weight: 700; border-bottom: 1px dotted #000; }
                 .payment-summary-title { font-size: 10pt; font-weight: 800; margin-bottom: 4px; border-bottom: 1px solid #000; padding-bottom: 2px; }
                 .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 12pt; font-weight: 800; border-top: 2px solid #000; margin-top: 6px; }
