@@ -1238,69 +1238,175 @@ from .models import (
 
 @login_required
 def sale_list(request):
-    """Show all sales"""
-    sales = Sale.objects.all()
-    sales = filter_queryset_by_user_locations(sales, request.user)
-    sales = sales.select_related('customer', 'location').prefetch_related('items__product').order_by('-date', '-created_at')
+    """List all sales with filters"""
+    user_locations = get_user_locations(request.user)
+    
+    # Base queryset
+    sales = Sale.objects.filter(location__in=user_locations).select_related(
+        'customer', 'location'
+    ).prefetch_related('items', 'payments').order_by('-date')
+    
+    # Get filter parameters
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    status_filter = request.GET.get('status', '')
+    payment_status_filter = request.GET.get('payment_status', '')
+    location_filter = request.GET.get('location', '')
+    customer_filter = request.GET.get('customer', '')
+    
+    # Apply filters
+    if date_from:
+        try:
+            sales = sales.filter(date__date__gte=date_from)
+        except:
+            pass
+    
+    if date_to:
+        try:
+            sales = sales.filter(date__date__lte=date_to)
+        except:
+            pass
+    
+    if status_filter:
+        sales = sales.filter(document_status=status_filter)
+    
+    if payment_status_filter == 'fully_paid':
+        sales = sales.filter(paid_amount__gte=F('total_amount'))
+    elif payment_status_filter == 'partially_paid':
+        sales = sales.filter(paid_amount__gt=0, paid_amount__lt=F('total_amount'))
+    elif payment_status_filter == 'unpaid':
+        sales = sales.filter(paid_amount=0)
+    
+    if location_filter:
+        sales = sales.filter(location_id=location_filter)
+    
+    if customer_filter:
+        sales = sales.filter(
+            Q(customer__name__icontains=customer_filter) |
+            Q(customer_name__icontains=customer_filter)
+        )
+    
+    # Calculate totals
+    total_revenue = sales.aggregate(total=Sum('total_amount'))['total'] or 0
+    total_paid = sales.aggregate(total=Sum('paid_amount'))['total'] or 0
+    total_balance = total_revenue - total_paid
+    
+    # Calculate paid/unpaid/partial counts
+    paid_sales = sales.filter(paid_amount__gte=F('total_amount')).count()
+    unpaid_sales = sales.filter(paid_amount=0).count()
+    partial_sales = sales.filter(paid_amount__gt=0, paid_amount__lt=F('total_amount')).count()
+    
+    # Calculate total items sold (count of sale items)
+    total_items_sold = 0
+    for sale in sales:
+        total_items_sold += sale.items.count()
     
     context = {
         'sales': sales,
+        'total_revenue': total_revenue,
+        'total_paid': total_paid,
+        'total_balance': total_balance,
+        'total_sales': sales.count(),
+        'paid_sales': paid_sales,
+        'unpaid_sales': unpaid_sales,
+        'partial_sales': partial_sales,
+        'total_items_sold': total_items_sold,
+        'locations': user_locations,
+        'date_from': date_from,
+        'date_to': date_to,
+        'status_filter': status_filter,
+        'payment_status_filter': payment_status_filter,
+        'location_filter': location_filter,
+        'customer_filter': customer_filter,
+        'has_filters': any([date_from, date_to, status_filter, payment_status_filter, location_filter, customer_filter]),
     }
     return render(request, 'inventory/sale_list.html', context)
 
 @login_required
 @transaction.atomic
 def sale_add(request):
-    """Create a new sale with support for units of measure and multiple payments"""
+    """Create a new sale with support for units of measure, multiple payments, and customer balance"""
     
-    # Get locations from core app
     from core.models import Location
     from decimal import Decimal
+    from transactions.models import Customer
     
     user_locations = get_user_locations(request.user)
     
-    # Get customers from transactions app
-    from transactions.models import Customer
-    
     if request.method == 'POST':
-        # Debug: Print POST data
-        print("POST data:", request.POST)
-        print("Items data:", request.POST.get('items_data', '[]'))
-        print("Payment data:", request.POST.get('payment_data', '[]'))
-        
-        # Create form with POST data
-        form = SaleForm(request.POST, user=request.user)
-        
-        # Debug: Check form errors
-        if not form.is_valid():
-            print("Form errors:", form.errors)
-            for field, errors in form.errors.items():
-                for error in errors:
-                    messages.error(request, f"{field}: {error}")
-            return redirect('inventory:sale_add')
+        print("=== SALE ADD POST DATA ===")
+        print(request.POST)
         
         try:
-            # Save the sale
-            sale = form.save(commit=False)
-            sale.created_by = request.user
+            # Get customer information
+            customer_id = request.POST.get('customer')
+            customer_name = request.POST.get('customer_name', '').strip()
+            customer_phone = request.POST.get('customer_phone', '')
             
-            # Check if user can access the selected location
-            if not can_user_access_location(request.user, sale.location):
+            # Get location
+            location_id = request.POST.get('location')
+            if not location_id:
+                messages.error(request, "Location is required")
+                return redirect('inventory:sale_add')
+            
+            location = get_object_or_404(Location, id=location_id)
+            if not can_user_access_location(request.user, location):
                 messages.error(request, "You don't have permission to access this location")
                 return redirect('inventory:sale_add')
             
-            # Set document status based on button clicked
-            is_draft = 'save_draft' in request.POST
-            sale.document_status = 'draft' if is_draft else 'sent'
+            # Handle customer and get balance
+            customer = None
+            customer_balance = Decimal('0.00')
             
-            # Save sale to get ID
+            if customer_id and customer_id != '' and customer_id != 'new':
+                try:
+                    customer = Customer.objects.get(id=customer_id)
+                    customer_balance = Decimal(str(customer.balance or 0))
+                    customer_name = customer.name
+                    customer_phone = customer.phone or ''
+                    print(f"Customer found: {customer_name}, Balance: {customer_balance}")
+                except Customer.DoesNotExist:
+                    pass
+            
+            # Get other sale info
+            document_type = request.POST.get('document_type', 'receipt')
+            currency = request.POST.get('currency', 'UGX')
+            sale_date = request.POST.get('date')
+            notes = request.POST.get('notes', '')
+            is_draft = 'save_draft' in request.POST
+            
+            # Parse sale date
+            try:
+                if sale_date:
+                    sale_datetime = timezone.datetime.fromisoformat(sale_date)
+                else:
+                    sale_datetime = timezone.now()
+            except (ValueError, TypeError):
+                sale_datetime = timezone.now()
+            
+            # Create the sale
+            sale = Sale(
+                customer=customer,
+                customer_name=customer_name if customer_name else (customer.name if customer else 'Walk-in Customer'),
+                customer_phone=customer_phone,
+                location=location,
+                document_type=document_type,
+                currency=currency,
+                date=sale_datetime,
+                notes=notes,
+                document_status='draft' if is_draft else 'sent',
+                created_by=request.user
+            )
             sale.save()
             
-            # Process sale items from the hidden field with unit support
+            # Save customer balance at sale time
+            if customer and customer_balance > 0:
+                sale.customer_balance_at_sale = float(customer_balance)
+                sale.save()
+            
+            # Process sale items
             items_data = request.POST.get('items_data', '[]')
             items = json.loads(items_data)
-            
-            print(f"Processing {len(items)} items...")
             
             total_amount = Decimal('0.00')
             stock_errors = []
@@ -1311,70 +1417,59 @@ def sale_add(request):
                 unit_id = item.get('unit_id')
                 unit_price = Decimal(str(item.get('unit_price', 0)))
                 
-                # Get the unit details for stock calculation
+                # Calculate base quantity for stock
                 base_quantity = quantity
-                unit_name = "unit"
+                unit_name = product.base_unit or "piece"
                 
-                if unit_id:
+                if unit_id and unit_id != 'default':
                     try:
                         product_unit = ProductUnit.objects.get(id=unit_id, product=product)
                         base_quantity = quantity * Decimal(str(product_unit.quantity_in_base))
                         unit_name = product_unit.unit_name
                     except ProductUnit.DoesNotExist:
-                        base_quantity = quantity
-                        unit_name = product.base_unit or "piece"
-                else:
-                    base_quantity = quantity
-                    unit_name = product.base_unit or "piece"
+                        pass
                 
                 item_total = quantity * unit_price
                 
-                # Create sale item with unit information
+                # Create sale item
                 SaleItem.objects.create(
                     sale=sale,
                     product=product,
                     quantity=float(quantity),
                     unit_price=float(unit_price),
                     total_price=float(item_total),
-                    unit_id=unit_id,
+                    unit_id=unit_id if unit_id != 'default' else None,
                     unit_name=unit_name,
                     base_quantity=float(base_quantity)
                 )
                 
                 total_amount += item_total
                 
-                # REDUCE STOCK only if not a draft and not a quotation
-                if not is_draft and sale.document_type != 'quotation' and sale.location:
+                # Reduce stock
+                if not is_draft and document_type != 'quotation':
                     try:
-                        updated = ProductStock.objects.filter(
+                        ProductStock.objects.filter(
                             product=product, 
-                            location=sale.location,
+                            location=location,
                             quantity__gte=base_quantity
                         ).update(quantity=F('quantity') - base_quantity)
-                        
-                        if not updated:
-                            stock_errors.append(f"Not enough stock for {product.name} (need {base_quantity} {product.base_unit}s)")
-                        
-                    except ProductStock.DoesNotExist:
-                        stock_errors.append(f"No stock found for {product.name} at {sale.location.name}")
+                    except Exception as e:
+                        stock_errors.append(f"Stock error for {product.name}: {str(e)}")
             
             # Check for stock errors
             if stock_errors:
-                # Rollback by deleting the sale
                 sale.delete()
                 for error in stock_errors:
                     messages.error(request, error)
                 return redirect('inventory:sale_add')
             
-            # Update sale total amount
+            # Update sale total
             sale.total_amount = float(total_amount)
             sale.save()
             
-            # ========== PROCESS PAYMENTS ==========
+            # Process payments
             payment_data = request.POST.get('payment_data', '[]')
             payments = json.loads(payment_data)
-            
-            print(f"Processing {len(payments)} payments...")
             
             total_paid = Decimal('0.00')
             for payment in payments:
@@ -1393,28 +1488,23 @@ def sale_add(request):
                         notes=f"Payment via {method}"
                     )
                     total_paid += amount
-                    print(f"Created payment: {method} - UGX {amount}")
             
-            # Update sale paid amount
+            # Update paid amount
             if total_paid > 0:
                 sale.paid_amount = float(total_paid)
                 if total_paid >= sale.total_amount:
                     sale.document_status = 'paid'
-                elif total_paid > 0:
-                    sale.document_status = 'sent'
                 sale.save()
-                print(f"Updated sale paid amount: UGX {total_paid}")
             
-            # Success message
+            # Success message with balance info
             status_text = "drafted" if is_draft else "created"
-            payment_count = len(payments)
-            if payment_count > 0:
-                messages.success(request, f"Sale {sale.document_number} {status_text} successfully! {payment_count} payment(s) recorded.")
-            else:
-                messages.success(request, f"Sale {sale.document_number} {status_text} successfully!")
+            if customer and customer_balance > 0:
+                messages.info(request, f"Customer has previous balance of UGX {customer_balance:,.0f}. Total due includes this balance.")
             
-            # Redirect based on button clicked
-            if 'save_print' in request.POST or 'print' in request.POST:
+            messages.success(request, f"Sale {sale.document_number} {status_text} successfully!")
+            
+            # Redirect
+            if 'save_print' in request.POST:
                 return redirect('inventory:print_sale', pk=sale.id)
             return redirect('inventory:sale_list')
                 
@@ -1423,31 +1513,54 @@ def sale_add(request):
             import traceback
             traceback.print_exc()
             return redirect('inventory:sale_add')
+    
     else:
-        form = SaleForm(user=request.user)
-        # Set initial location to user's default
-        default_location = get_user_default_location(request.user)
-        if default_location:
-            form.fields['location'].initial = default_location
+        # GET request - show form
+        products = Product.objects.all().select_related('category').prefetch_related('units')
+        customers = Customer.objects.all()
+        
+        # REMOVED THE PROBLEMATIC LINE - just pass customers as is
+        # The balance will be fetched via API when customer is selected
+        
+        return render(request, 'inventory/sale_add.html', {
+            'document_types': DocumentType.choices,
+            'currencies': Currency.choices,
+            'locations': user_locations,
+            'customers': customers,
+            'products': products,
+            'default_date': timezone.now().strftime('%Y-%m-%dT%H:%M'),
+        })
 
-    # Filter locations in form to only show accessible ones
-    form.fields['location'].queryset = user_locations
+
+# At the top level of the file (no indentation)
+@login_required
+def get_customer_balance_api(request):
+    """API endpoint to get customer balance for sale form"""
+    customer_id = request.GET.get('customer_id')
     
-    # Get products with their units prefetched
-    products = Product.objects.all().select_related('category').prefetch_related('units')
+    if not customer_id:
+        return JsonResponse({'ok': False, 'balance': 0, 'error': 'No customer ID provided'})
     
-    return render(request, 'inventory/sale_add.html', {
-        'form': form,
-        'document_types': DocumentType.choices,
-        'currencies': Currency.choices,
-        'locations': user_locations,
-        'customers': Customer.objects.all(),
-        'products': products,
-        'default_date': timezone.now().strftime('%Y-%m-%dT%H:%M'),
-    })
-
-
-
+    try:
+        from transactions.models import Customer
+        customer = Customer.objects.get(id=customer_id)
+        
+        # Use total_balance property (calculated from sales) instead of balance field
+        balance = float(customer.total_balance) if customer.total_balance else 0
+        
+        print(f"Customer {customer.name}: DB balance={customer.balance}, Calculated balance={balance}")
+        
+        return JsonResponse({
+            'ok': True,
+            'balance': balance,
+            'name': customer.name,
+            'phone': customer.phone or ''
+        })
+        
+    except Customer.DoesNotExist:
+        return JsonResponse({'ok': False, 'balance': 0, 'error': 'Customer not found'})
+    except Exception as e:
+        return JsonResponse({'ok': False, 'balance': 0, 'error': str(e)})
 
 @login_required
 def api_products(request):
@@ -1641,10 +1754,9 @@ def product_search_api(request):
     except Exception as e:
         return JsonResponse({'error': str(e), 'products': []}, status=500)
 
-
 @login_required
 def print_sale(request, pk):
-    """Print sale receipt with unit information"""
+    """Print sale receipt with unit information and customer balance"""
     sale = get_object_or_404(
         Sale.objects.select_related('customer', 'location', 'created_by')
                     .prefetch_related(
@@ -1661,13 +1773,42 @@ def print_sale(request, pk):
     # Get company details
     company = CompanyDetails.objects.first()
     if not company:
-        # Create default company details if they don't exist
         company = CompanyDetails.objects.create(
             name="Tusakimu Enterprises",
             address="Kampala, Uganda",
             phone="+256 XXX XXX XXX",
             email="info@tusakimu.com"
         )
+    
+    # Calculate customer's previous balance (unpaid sales excluding current sale)
+    customer_balance = 0
+    if sale.customer:
+        # Get all unpaid sales for this customer (excluding current sale)
+        unpaid_sales = Sale.objects.filter(
+            customer=sale.customer,
+            document_status='sent'
+        ).exclude(id=sale.id)
+        
+        for unpaid in unpaid_sales:
+            balance = (unpaid.total_amount or 0) - (unpaid.paid_amount or 0)
+            if balance > 0:
+                customer_balance += balance
+        
+        # Also check manual supply/debt
+        if hasattr(sale.customer, 'supply') and sale.customer.supply:
+            customer_balance += float(sale.customer.supply)
+    
+    # Calculate total due (current bill + previous balance)
+    current_bill = sale.total_amount or 0
+    total_due = current_bill + customer_balance
+    
+    print(f"\n=== PRINT SALE DEBUG ===")
+    print(f"Sale ID: {sale.id}")
+    print(f"Customer: {sale.customer.name if sale.customer else 'Walk-in'}")
+    print(f"Current Bill: UGX {current_bill:,.2f}")
+    print(f"Previous Balance: UGX {customer_balance:,.2f}")
+    print(f"Total Due: UGX {total_due:,.2f}")
+    print(f"=======================\n")
     
     # Auto-print if requested
     auto_print = request.GET.get('autoprint') == 'true'
@@ -1676,194 +1817,314 @@ def print_sale(request, pk):
         'sale': sale,
         'company': company,
         'auto_print': auto_print,
+        'customer_balance': customer_balance,
+        'total_due': total_due,
+        'current_bill': current_bill,
     }
     return render(request, 'inventory/print_sale.html', context)
-
-
-# ADD THIS - Helper function to filter queryset by user locations
-def filter_queryset_by_user_locations(queryset, user, location_field='location'):
-    """Filter a queryset by locations the user has access to"""
-    user_locations = get_user_locations(user)
-    if user_locations:
-        filter_kwargs = {f'{location_field}__in': user_locations}
-        return queryset.filter(**filter_kwargs)
-    return queryset.none()
-
 # =======================
 # SALES REPORT (MISSING VIEW)
 # =======================
 @login_required
 def sales_report(request):
-    """Sales report with product-wise analysis including units of measure and payment methods"""
+    """Sales report with product-wise analysis, payment methods, and cash drawer summary"""
     from decimal import Decimal
+    from django.db.models import Sum, F, Q
     
-    # Get all sales with related data including payments
-    sales = Sale.objects.filter(document_status='sent').select_related(
-        'customer', 'location'
-    ).prefetch_related(
-        'items__product',
-        'items__product__units',
-        'payments'
-    ).order_by('-date')
-    
-    # Filter by user locations
-    sales = filter_queryset_by_user_locations(sales, request.user)
-    
-    # Get filter parameters
-    date_from = request.GET.get('date_from', '')
-    date_to = request.GET.get('date_to', '')
-    category_id = request.GET.get('category', '')
-    product_name = request.GET.get('product_name', '')
-    customer_id = request.GET.get('customer', '')
-    location_id = request.GET.get('location', '')
-    
-    # Apply filters
-    if date_from:
-        sales = sales.filter(date__date__gte=date_from)
-    if date_to:
-        sales = sales.filter(date__date__lte=date_to)
-    if category_id:
-        sales = sales.filter(items__product__category_id=category_id).distinct()
-    if product_name:
-        sales = sales.filter(items__product__name__icontains=product_name).distinct()
-    if customer_id:
-        sales = sales.filter(customer_id=customer_id)
-    if location_id:
-        try:
-            location = Location.objects.get(id=location_id)
-            if can_user_access_location(request.user, location):
-                sales = sales.filter(location_id=location_id)
-        except Location.DoesNotExist:
-            pass
-    
-    # Calculate product-wise sales data
-    product_sales = {}
-    total_revenue = Decimal('0.00')
-    total_cost = Decimal('0.00')
-    total_profit = Decimal('0.00')
-    unit_summary = {}
-    payment_method_summary = {}
-    total_quantity = 0
-    
-    for sale in sales:
-        # Track payment methods
-        for payment in sale.payments.all():
-            method = payment.get_payment_method_display()
-            if method not in payment_method_summary:
-                payment_method_summary[method] = {
-                    'count': 0,
-                    'total_amount': Decimal('0.00')
-                }
-            payment_method_summary[method]['count'] += 1
-            payment_method_summary[method]['total_amount'] += Decimal(str(payment.amount))
+    try:
+        # Get ALL sales (both sent and paid)
+        sales = Sale.objects.all().select_related(
+            'customer', 'location'
+        ).prefetch_related(
+            'items__product',
+            'items__product__units',
+            'payments'
+        ).order_by('-date')
         
-        for item in sale.items.all():
-            product = item.product
-            quantity = Decimal(str(item.quantity))
-            revenue = Decimal(str(item.total_price))
+        # Filter by user locations
+        sales = filter_queryset_by_user_locations(sales, request.user)
+        
+        # Get filter parameters
+        date_from = request.GET.get('date_from', '')
+        date_to = request.GET.get('date_to', '')
+        category_id = request.GET.get('category', '')
+        product_name = request.GET.get('product_name', '')
+        customer_id = request.GET.get('customer', '')
+        location_id = request.GET.get('location', '')
+        payment_status = request.GET.get('payment_status', '')
+        
+        # Apply filters
+        if date_from:
+            sales = sales.filter(date__date__gte=date_from)
+        if date_to:
+            sales = sales.filter(date__date__lte=date_to)
+        if category_id:
+            sales = sales.filter(items__product__category_id=category_id).distinct()
+        if product_name:
+            sales = sales.filter(items__product__name__icontains=product_name).distinct()
+        if customer_id:
+            sales = sales.filter(customer_id=customer_id)
+        if location_id:
+            try:
+                location = Location.objects.get(id=location_id)
+                if can_user_access_location(request.user, location):
+                    sales = sales.filter(location_id=location_id)
+            except Location.DoesNotExist:
+                pass
+        
+        # Apply payment status filter
+        if payment_status == 'paid':
+            sales = sales.filter(paid_amount__gte=F('total_amount'))
+        elif payment_status == 'unpaid':
+            sales = sales.filter(paid_amount=0)
+        elif payment_status == 'partial':
+            sales = sales.filter(paid_amount__gt=0, paid_amount__lt=F('total_amount'))
+        
+        # ============================================================
+        # PAYMENT METHODS SUMMARY
+        # ============================================================
+        payment_method_summary = {
+            'cash': {'count': 0, 'amount': Decimal('0.00')},
+            'mobile_money': {'count': 0, 'amount': Decimal('0.00')},
+            'bank_transfer': {'count': 0, 'amount': Decimal('0.00')},
+            'credit_card': {'count': 0, 'amount': Decimal('0.00')},
+            'other': {'count': 0, 'amount': Decimal('0.00')}
+        }
+        
+        total_cash_in_drawer = Decimal('0.00')
+        total_mobile_money = Decimal('0.00')
+        total_bank_transfer = Decimal('0.00')
+        total_card_payments = Decimal('0.00')
+        
+        for sale in sales:
+            for payment in sale.payments.all():
+                method = payment.payment_method
+                amount = Decimal(str(payment.amount))
+                
+                if method in payment_method_summary:
+                    payment_method_summary[method]['count'] += 1
+                    payment_method_summary[method]['amount'] += amount
+                else:
+                    payment_method_summary['other']['count'] += 1
+                    payment_method_summary['other']['amount'] += amount
+                
+                if method == 'cash':
+                    total_cash_in_drawer += amount
+                elif method == 'mobile_money':
+                    total_mobile_money += amount
+                elif method == 'bank_transfer':
+                    total_bank_transfer += amount
+                elif method == 'credit_card':
+                    total_card_payments += amount
+        
+        # ============================================================
+        # SALES SUMMARY
+        # ============================================================
+        total_sales_count = sales.count()
+        total_revenue = Decimal('0.00')
+        total_paid_amount = Decimal('0.00')
+        total_unpaid_amount = Decimal('0.00')
+        total_partial_amount = Decimal('0.00')
+        
+        paid_sales_count = 0
+        unpaid_sales_count = 0
+        partial_sales_count = 0
+        
+        for sale in sales:
+            sale_total = Decimal(str(sale.total_amount))
+            sale_paid = Decimal(str(sale.paid_amount)) if sale.paid_amount else Decimal('0')
+            sale_balance = sale_total - sale_paid
             
-            base_qty = Decimal(str(item.base_quantity)) if item.base_quantity else quantity
-            cost = Decimal(str(product.cost_price)) * base_qty
-            profit = revenue - cost
+            total_revenue += sale_total
+            total_paid_amount += sale_paid
             
-            # Calculate margin as Decimal
-            if revenue > 0:
-                margin = float(profit / revenue * 100)
+            if sale_paid >= sale_total:
+                paid_sales_count += 1
+            elif sale_paid == 0:
+                unpaid_sales_count += 1
+                total_unpaid_amount += sale_total
             else:
-                margin = 0
-            
-            unit_name = item.unit_name if item.unit_name else product.base_unit
-            unit_key = f"{product.id}_{unit_name}"
-            
-            if unit_key not in unit_summary:
-                unit_summary[unit_key] = {
-                    'unit_name': unit_name,
-                    'product_name': product.name,
-                    'quantity_sold': 0,
-                    'revenue': Decimal('0.00'),
-                    'base_quantity': 0
-                }
-            
-            unit_summary[unit_key]['quantity_sold'] += float(quantity)
-            unit_summary[unit_key]['revenue'] += revenue
-            unit_summary[unit_key]['base_quantity'] += float(base_qty)
-            
-            if product.id not in product_sales:
-                product_sales[product.id] = {
-                    'product': product,
-                    'quantity': 0,
-                    'revenue': Decimal('0.00'),
-                    'cost': Decimal('0.00'),
-                    'profit': Decimal('0.00'),
-                    'margin': 0,
-                    'units_sold': {}
-                }
-            
-            if unit_name not in product_sales[product.id]['units_sold']:
-                product_sales[product.id]['units_sold'][unit_name] = {
-                    'quantity': 0,
-                    'revenue': Decimal('0.00')
-                }
-            product_sales[product.id]['units_sold'][unit_name]['quantity'] += float(quantity)
-            product_sales[product.id]['units_sold'][unit_name]['revenue'] += revenue
-            
-            product_sales[product.id]['quantity'] += float(quantity)
-            product_sales[product.id]['revenue'] += revenue
-            product_sales[product.id]['cost'] += cost
-            product_sales[product.id]['profit'] += profit
-            total_quantity += float(quantity)
-            
-            total_revenue += revenue
-            total_cost += cost
-            total_profit += profit
-    
-    # Calculate average margin for each product
-    for product_data in product_sales.values():
-        if product_data['revenue'] > 0:
-            product_data['margin'] = float(product_data['profit'] / product_data['revenue'] * 100)
-    
-    # Convert to list and sort by revenue
-    product_sales_list = sorted(
-        product_sales.values(), 
-        key=lambda x: x['revenue'], 
-        reverse=True
-    )
-    
-    # Get filter options
-    categories = Category.objects.filter(
-        product__saleitem__sale__in=sales
-    ).distinct()
-    
-    customers = Customer.objects.filter(
-        sale__in=sales
-    ).distinct()
-    
-    locations = get_user_locations(request.user)
-    
-    # Convert Decimal to float for template
-    context = {
-        'product_sales': product_sales_list,
-        'total_revenue': float(total_revenue),
-        'total_cost': float(total_cost),
-        'total_profit': float(total_profit),
-        'total_margin': float(total_profit / total_revenue * 100) if total_revenue > 0 else 0,
-        'total_quantity': total_quantity,
-        'unit_summary': unit_summary,
-        'payment_method_summary': payment_method_summary,
+                partial_sales_count += 1
+                total_partial_amount += sale_balance
         
-        'categories': categories,
-        'customers': customers,
-        'locations': locations,
+        total_outstanding_balance = total_revenue - total_paid_amount
+        cash_in_drawer = total_cash_in_drawer
         
-        'date_from': date_from,
-        'date_to': date_to,
-        'category_id': category_id,
-        'product_name': product_name,
-        'customer_id': customer_id,
-        'location_id': location_id,
-    }
-    
-    return render(request, 'inventory/sales_report.html', context)
+        # ============================================================
+        # Product-wise sales data
+        # ============================================================
+        product_sales = {}
+        total_cost = Decimal('0.00')
+        total_profit = Decimal('0.00')
+        unit_summary = {}
+        total_quantity = 0
+        
+        for sale in sales:
+            for item in sale.items.all():
+                product = item.product
+                quantity = Decimal(str(item.quantity))
+                revenue = Decimal(str(item.total_price))
+                
+                base_qty = Decimal(str(item.base_quantity)) if item.base_quantity else quantity
+                cost = Decimal(str(product.cost_price)) * base_qty
+                profit = revenue - cost
+                
+                if revenue > 0:
+                    margin = float(profit / revenue * 100)
+                else:
+                    margin = 0
+                
+                unit_name = item.unit_name if item.unit_name else product.base_unit
+                unit_key = f"{product.id}_{unit_name}"
+                
+                if unit_key not in unit_summary:
+                    unit_summary[unit_key] = {
+                        'unit_name': unit_name,
+                        'product_name': product.name,
+                        'quantity_sold': 0,
+                        'revenue': Decimal('0.00'),
+                        'base_quantity': 0
+                    }
+                
+                unit_summary[unit_key]['quantity_sold'] += float(quantity)
+                unit_summary[unit_key]['revenue'] += revenue
+                unit_summary[unit_key]['base_quantity'] += float(base_qty)
+                
+                if product.id not in product_sales:
+                    product_sales[product.id] = {
+                        'product': product,
+                        'quantity': 0,
+                        'revenue': Decimal('0.00'),
+                        'cost': Decimal('0.00'),
+                        'profit': Decimal('0.00'),
+                        'margin': 0,
+                        'units_sold': {}
+                    }
+                
+                if unit_name not in product_sales[product.id]['units_sold']:
+                    product_sales[product.id]['units_sold'][unit_name] = {
+                        'quantity': 0,
+                        'revenue': Decimal('0.00')
+                    }
+                
+                product_sales[product.id]['units_sold'][unit_name]['quantity'] += float(quantity)
+                product_sales[product.id]['units_sold'][unit_name]['revenue'] += revenue
+                
+                product_sales[product.id]['quantity'] += float(quantity)
+                product_sales[product.id]['revenue'] += revenue
+                product_sales[product.id]['cost'] += cost
+                product_sales[product.id]['profit'] += profit
+                total_quantity += float(quantity)
+                
+                total_cost += cost
+                total_profit += profit
+        
+        # Calculate average margin for each product
+        for product_data in product_sales.values():
+            if product_data['revenue'] > 0:
+                product_data['margin'] = float(product_data['profit'] / product_data['revenue'] * 100)
+        
+        # Convert to list and sort by revenue
+        product_sales_list = sorted(
+            product_sales.values(), 
+            key=lambda x: x['revenue'], 
+            reverse=True
+        )
+        
+        # Get filter options
+        categories = Category.objects.all()
+        customers = Customer.objects.all()
+        locations = get_user_locations(request.user)
+        
+        # Convert to display format
+        payment_methods_display = []
+        method_icons = {
+            'cash': '💵',
+            'mobile_money': '📱',
+            'bank_transfer': '🏦',
+            'credit_card': '💳',
+            'other': '💰'
+        }
+        method_names = {
+            'cash': 'Cash',
+            'mobile_money': 'Mobile Money',
+            'bank_transfer': 'Bank Transfer',
+            'credit_card': 'Credit Card',
+            'other': 'Other'
+        }
+        
+        for method, data in payment_method_summary.items():
+            if data['count'] > 0 or data['amount'] > 0:
+                payment_methods_display.append({
+                    'method': method_names.get(method, method.replace('_', ' ').title()),
+                    'icon': method_icons.get(method, '💰'),
+                    'count': data['count'],
+                    'amount': float(data['amount'])
+                })
+        
+        context = {
+            # Product analysis
+            'product_sales': product_sales_list,
+            'total_revenue': float(total_revenue),
+            'total_cost': float(total_cost),
+            'total_profit': float(total_profit),
+            'total_margin': float(total_profit / total_revenue * 100) if total_revenue > 0 else 0,
+            'total_quantity': total_quantity,
+            'unit_summary': unit_summary,
+            
+            # Payment methods summary
+            'payment_method_summary': payment_methods_display,
+            'total_cash_in_drawer': float(total_cash_in_drawer),
+            'total_mobile_money': float(total_mobile_money),
+            'total_bank_transfer': float(total_bank_transfer),
+            'total_card_payments': float(total_card_payments),
+            'cash_in_drawer': float(cash_in_drawer),
+            
+            # Sales summary
+            'sales': sales,
+            'total_sales_count': total_sales_count,
+            'paid_sales_count': paid_sales_count,
+            'unpaid_sales_count': unpaid_sales_count,
+            'partial_sales_count': partial_sales_count,
+            'total_paid_amount': float(total_paid_amount),
+            'total_unpaid_amount': float(total_unpaid_amount),
+            'total_partial_balance': float(total_partial_amount),
+            'total_outstanding_balance': float(total_outstanding_balance),
+            
+            # Filters
+            'categories': categories,
+            'customers': customers,
+            'locations': locations,
+            'date_from': date_from,
+            'date_to': date_to,
+            'category_id': category_id,
+            'product_name': product_name,
+            'customer_id': customer_id,
+            'location_id': location_id,
+            'payment_status': payment_status,
+            
+            # Status choices for filter
+            'payment_status_choices': [
+                ('', 'All Sales'),
+                ('paid', 'Fully Paid'),
+                ('unpaid', 'Not Paid'),
+                ('partial', 'Partially Paid'),
+            ],
+        }
+        
+        return render(request, 'inventory/sales_report.html', context)
+        
+    except Exception as e:
+        print(f"Error in sales_report: {e}")
+        import traceback
+        traceback.print_exc()
+        messages.error(request, f"Error generating sales report: {str(e)}")
+        return render(request, 'inventory/sales_report.html', {
+            'error': str(e),
+            'product_sales': [],
+            'total_revenue': 0,
+            'sales': [],
+        })
 
 # =======================
 # STOCK TRANSFERS
