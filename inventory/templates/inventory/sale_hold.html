@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0">
+                        <i class="fas fa-pause-circle me-2"></i>Put Sale on Hold
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <strong>Sale #{{ sale.document_number }}</strong><br>
+                        Customer: {{ sale.customer.name|default:sale.customer_name|default:"Walk-in" }}<br>
+                        Total Amount: UGX {{ sale.total_amount|floatformat:0 }}
+                    </div>
+                    
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Hold Reason</label>
+                            <select name="hold_reason" class="form-select" required>
+                                <option value="">Select reason...</option>
+                                <option value="Customer requested hold">Customer requested hold</option>
+                                <option value="Waiting for payment">Waiting for payment</option>
+                                <option value="Waiting for approval">Waiting for approval</option>
+                                <option value="Incomplete order">Incomplete order</option>
+                                <option value="Customer will return later">Customer will return later</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Hold Duration</label>
+                            <select name="hold_days" class="form-select" required>
+                                {% for option in hold_options %}
+                                <option value="{{ option.days }}" {% if option.days == 7 %}selected{% endif %}>
+                                    {{ option.label }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text">Sale will be automatically removed from hold after this period</div>
+                        </div>
+                        
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <strong>Note:</strong> Stock is NOT deducted when a sale is on hold. 
+                            Items remain available for other customers.
+                        </div>
+                        
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-warning">
+                                <i class="fas fa-pause-circle"></i> Put on Hold
+                            </button>
+                            <a href="{% url 'inventory:sale_list' %}" class="btn btn-secondary">
+                                Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

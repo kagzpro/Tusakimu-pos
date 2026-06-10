@@ -125,10 +125,13 @@
                             <textarea name="notes" class="form-control form-control-sm" rows="2" placeholder="Notes..."></textarea>
                         </div>
 
-                        <!-- Action Buttons -->
+                        <!-- Action Buttons - INSIDE THE FORM -->
                         <div class="d-flex gap-2">
                             <button type="submit" name="save_sent" class="btn btn-success btn-sm flex-grow-1" id="createSaleBtn">
                                 <i class="fas fa-check"></i> Complete Sale
+                            </button>
+                            <button type="submit" name="save_hold" class="btn btn-warning btn-sm" id="saveHoldBtn">
+                                <i class="fas fa-pause-circle"></i> Hold for Later
                             </button>
                             <button type="submit" name="save_print" class="btn btn-info btn-sm" id="savePrintBtn">
                                 <i class="fas fa-print"></i> Save & Print
@@ -178,7 +181,6 @@
                         </span>
                         <input type="number" id="payment_mobile" class="form-control payment-input" placeholder="0" value="0" step="100">
                         <input type="text" id="mobile_reference" class="form-control" placeholder="Ref" style="width: 80px;">
-                        <input type="text" id="bank_reference" class="form-control" placeholder="Ref" style="width: 80px;">
                     </div>
                     
                     <!-- Bank Transfer -->
@@ -187,6 +189,7 @@
                             🏦 Bank Transfer
                         </span>
                         <input type="number" id="payment_bank" class="form-control payment-input" placeholder="0" value="0" step="100">
+                        <input type="text" id="bank_reference" class="form-control" placeholder="Ref" style="width: 80px;">
                     </div>
                     
                     <!-- Card -->
@@ -372,13 +375,13 @@ function getUnitOptions(productId) {
         var html = '<option value="">Select unit...</option>';
         for (var i = 0; i < product.units.length; i++) {
             var unit = product.units[i];
-            html += '<option value="' + unit.id + '" data-base-qty="' + unit.quantity_in_base + '" data-price="' + unit.selling_price + '">' +
+            html += '<option value="' + unit.id + '" data-base-qty="' + unit.quantity_in_base + '" data-price="' + unit.selling_price + '" data-cost="' + product.cost_price + '">' +
                 unit.name + ' (1 = ' + unit.quantity_in_base + ' ' + product.base_unit + 's) - ' + currencySymbol + ' ' + formatMoney(unit.selling_price) +
             '</option>';
         }
         return html;
     }
-    return '<option value="default" data-base-qty="1" data-price="' + product.default_selling_price + '">' +
+    return '<option value="default" data-base-qty="1" data-price="' + product.default_selling_price + '" data-cost="' + product.cost_price + '">' +
         product.base_unit + ' - ' + currencySymbol + ' ' + formatMoney(product.default_selling_price) +
     '</option>';
 }
@@ -406,21 +409,21 @@ function createProductRow() {
                 <option value="">Select product</option>
             </select>
          </td>
-        <td class="stock-cell stock-info text-center fw-bold">-</td>
-        <td>
+        <td class="stock-cell stock-info text-center fw-bold">-</span>
+        <tr>
             <input type="number" class="form-control form-control-sm quantity" min="0.01" step="0.01" value="1" disabled>
-         </td>
+        </td>
         <td>
             <input type="number" class="form-control form-control-sm unit-price" step="100" min="0">
-         </td>
+        </td>
         <td>
             <input type="text" class="form-control form-control-sm total" readonly value="0">
-         </td>
+        </td>
         <td class="text-center">
             <button type="button" class="btn btn-danger btn-sm remove-row">
                 <i class="fas fa-trash"></i>
             </button>
-         </td>
+        </td>
     `;
     
     return row;
@@ -454,6 +457,58 @@ async function updateStockInfo(row) {
     } else {
         stockSpan.style.color = '#10b981';
     }
+    
+    validateStock(row);
+}
+
+// ==================== VALIDATION FUNCTIONS ====================
+function validateStock(row) {
+    var quantityInput = row.querySelector('.quantity');
+    var stockSpan = row.querySelector('.stock-info');
+    var quantity = parseFloat(quantityInput.value) || 0;
+    var availableStock = parseFloat(stockSpan.textContent) || 0;
+    
+    row.querySelector('.stock-error')?.remove();
+    
+    if (quantity > availableStock && availableStock > 0) {
+        quantityInput.classList.add('is-invalid');
+        var errorSpan = document.createElement('small');
+        errorSpan.className = 'stock-error text-danger';
+        errorSpan.innerHTML = `<i class="fas fa-exclamation-circle"></i> Only ${availableStock.toFixed(2)} units available in stock`;
+        quantityInput.parentNode.appendChild(errorSpan);
+        return false;
+    } else {
+        quantityInput.classList.remove('is-invalid');
+        return true;
+    }
+}
+
+function validatePrice(row) {
+    var priceInput = row.querySelector('.unit-price');
+    var unitSelect = row.querySelector('.unit-select');
+    var price = parseFloat(priceInput.value) || 0;
+    var unitValue = unitSelect ? unitSelect.value : null;
+    
+    row.querySelector('.price-error')?.remove();
+    
+    if (!unitValue || price === 0) {
+        return true;
+    }
+    
+    var selectedOption = unitSelect.options[unitSelect.selectedIndex];
+    var costPrice = parseFloat(selectedOption?.dataset.cost) || 0;
+    
+    if (price < costPrice && costPrice > 0) {
+        priceInput.classList.add('is-invalid');
+        var errorSpan = document.createElement('small');
+        errorSpan.className = 'price-error text-danger';
+        errorSpan.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Price below cost (UGX ${formatMoney(costPrice)})`;
+        priceInput.parentNode.appendChild(errorSpan);
+        return false;
+    } else {
+        priceInput.classList.remove('is-invalid');
+        return true;
+    }
 }
 
 function recalcRow(row) {
@@ -461,6 +516,10 @@ function recalcRow(row) {
     var price = parseFloat(row.querySelector('.unit-price').value) || 0;
     var total = quantity * price;
     row.querySelector('.total').value = formatMoney(total);
+    
+    validateStock(row);
+    validatePrice(row);
+    
     updateGrandTotal();
     saveItemsData();
 }
@@ -475,132 +534,52 @@ function updateGrandTotal() {
     document.getElementById('itemsCount').innerHTML = document.querySelectorAll('.product-row').length + ' items';
     updatePaymentCalculations();
 }
+
 function updatePaymentCalculations() {
-
-    var currentBill =
-        parseMoney(document.getElementById('grandTotal').innerText);
-
-    var totalDue =
-        currentBill + currentCustomerBalance;
-
-    var cash =
-        parseMoney(document.getElementById('payment_cash').value) || 0;
-
-    var mobile =
-        parseMoney(document.getElementById('payment_mobile').value) || 0;
-
-    var bank =
-        parseMoney(document.getElementById('payment_bank').value) || 0;
-
-    var card =
-        parseMoney(document.getElementById('payment_card').value) || 0;
-
-    var totalCollected =
-        cash + mobile + bank + card;
-
-    var remainingDue =
-        totalDue - totalCollected;
-
-    var changeDue =
-        totalCollected > totalDue
-            ? totalCollected - totalDue
-            : 0;
-
-    // Main totals
-
-    document.getElementById('totalCollected').innerHTML =
-        currencySymbol + ' ' + formatMoney(totalCollected);
-
-
-
-    document.getElementById('currentBillDisplay').innerHTML =
-        currencySymbol + ' ' + formatMoney(currentBill);
-
-    // Previous balance
-
+    var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
+    var totalDue = currentBill + currentCustomerBalance;
+    var cash = parseMoney(document.getElementById('payment_cash').value) || 0;
+    var mobile = parseMoney(document.getElementById('payment_mobile').value) || 0;
+    var bank = parseMoney(document.getElementById('payment_bank').value) || 0;
+    var card = parseMoney(document.getElementById('payment_card').value) || 0;
+    
+    var totalCollected = cash + mobile + bank + card;
+    var remainingDue = totalDue - totalCollected;
+    var changeDue = totalCollected > totalDue ? totalCollected - totalDue : 0;
+    
+    document.getElementById('totalCollected').innerHTML = currencySymbol + ' ' + formatMoney(totalCollected);
+    document.getElementById('balanceDue').innerHTML = currencySymbol + ' ' + formatMoney(Math.max(0, remainingDue));
+    document.getElementById('balanceDueDisplay').innerHTML = currencySymbol + ' ' + formatMoney(Math.max(0, remainingDue));
+    document.getElementById('currentBillDisplay').innerHTML = currencySymbol + ' ' + formatMoney(currentBill);
+    
     if (currentCustomerBalance > 0) {
-
-        document.getElementById('customerBalanceAlert').style.display =
-            'block';
-
-        document.getElementById('customerBalanceAmount').innerHTML =
-            currencySymbol + ' ' +
-            formatMoney(currentCustomerBalance);
-
-        document.getElementById('prevBalanceContainer').style.display =
-            'block';
-
-        document.getElementById('prevBalanceDisplay').innerHTML =
-            currencySymbol + ' ' +
-            formatMoney(currentCustomerBalance);
-
-        document.getElementById('prevBalanceRow').style.display =
-            'flex';
-
-        document.getElementById('prevBalanceTotal').innerHTML =
-            currencySymbol + ' ' +
-            formatMoney(currentCustomerBalance);
-
-        document.getElementById('totalDueContainer').style.display =
-            'block';
-
-        document.getElementById('totalDueDisplay').innerHTML =
-            currencySymbol + ' ' +
-            formatMoney(totalDue);
-
-        document.getElementById('totalDueRow').style.display =
-            'flex';
-
-        document.getElementById('totalDue').innerHTML =
-            currencySymbol + ' ' +
-            formatMoney(totalDue);
-
+        document.getElementById('prevBalanceDisplay').innerHTML = currencySymbol + ' ' + formatMoney(currentCustomerBalance);
+        document.getElementById('prevBalanceContainer').style.display = 'block';
+        document.getElementById('prevBalanceRow').style.display = 'flex';
+        document.getElementById('prevBalanceTotal').innerHTML = currencySymbol + ' ' + formatMoney(currentCustomerBalance);
+        document.getElementById('totalDueDisplay').innerHTML = currencySymbol + ' ' + formatMoney(totalDue);
+        document.getElementById('totalDueContainer').style.display = 'block';
+        document.getElementById('totalDueRow').style.display = 'flex';
+        document.getElementById('totalDue').innerHTML = currencySymbol + ' ' + formatMoney(totalDue);
     } else {
-
-        document.getElementById('customerBalanceAlert').style.display =
-            'none';
-
-        document.getElementById('prevBalanceContainer').style.display =
-            'none';
-
-        document.getElementById('prevBalanceRow').style.display =
-            'none';
-
-        document.getElementById('totalDueContainer').style.display =
-            'none';
-
-        document.getElementById('totalDueRow').style.display =
-            'none';
+        document.getElementById('prevBalanceContainer').style.display = 'none';
+        document.getElementById('prevBalanceRow').style.display = 'none';
+        document.getElementById('totalDueContainer').style.display = 'none';
+        document.getElementById('totalDueRow').style.display = 'none';
     }
-
-    // Change
-
+    
     if (changeDue > 0) {
-
-        document.getElementById('changeDue').innerHTML =
-            currencySymbol + ' ' + formatMoney(changeDue);
-
-        document.getElementById('changeRow').style.display =
-            'flex';
-
-        document.getElementById('balanceRow').style.display =
-            'none';
-
+        document.getElementById('changeDue').innerHTML = currencySymbol + ' ' + formatMoney(changeDue);
+        document.getElementById('changeRow').style.display = 'flex';
+        document.getElementById('balanceRow').style.display = 'none';
     } else {
-
-        document.getElementById('changeRow').style.display =
-            'none';
-
-        document.getElementById('balanceRow').style.display =
-            'flex';
+        document.getElementById('changeRow').style.display = 'none';
+        document.getElementById('balanceRow').style.display = 'flex';
     }
-
-    document.getElementById('id_paid_amount').value =
-        totalCollected;
-
+    
+    document.getElementById('id_paid_amount').value = totalCollected;
     updatePaymentStatus();
 }
-
 
 function saveItemsData() {
     var items = [];
@@ -730,8 +709,26 @@ function setupRowEvents(row) {
             $(unitSelect).off('change').on('change', function() {
                 var opt = this.options[this.selectedIndex];
                 if (opt && opt.dataset && opt.dataset.price) {
-                    priceInput.value = parseFloat(opt.dataset.price).toFixed(0);
+                    var defaultPrice = parseFloat(opt.dataset.price);
+                    var costPrice = parseFloat(opt.dataset.cost) || 0;
+                    
+                    priceInput.value = defaultPrice.toFixed(0);
+                    priceInput.dataset.defaultPrice = defaultPrice;
+                    priceInput.dataset.minPrice = costPrice;
                     quantityInput.disabled = false;
+                    
+                    if (defaultPrice < costPrice && costPrice > 0) {
+                        priceInput.classList.add('is-invalid');
+                        row.querySelector('.price-error')?.remove();
+                        var errorSpan = document.createElement('small');
+                        errorSpan.className = 'price-error text-danger';
+                        errorSpan.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Price below cost (UGX ${formatMoney(costPrice)})`;
+                        priceInput.parentNode.appendChild(errorSpan);
+                    } else {
+                        priceInput.classList.remove('is-invalid');
+                        row.querySelector('.price-error')?.remove();
+                    }
+                    
                     updateStockInfo(row);
                     recalcRow(row);
                 }
@@ -747,8 +744,15 @@ function setupRowEvents(row) {
         }
     });
     
-    priceInput.addEventListener('input', function() { recalcRow(row); });
-    quantityInput.addEventListener('input', function() { recalcRow(row); });
+    priceInput.addEventListener('input', function() {
+        validatePrice(row);
+        recalcRow(row);
+    });
+    
+    quantityInput.addEventListener('input', function() {
+        validateStock(row);
+        recalcRow(row);
+    });
     
     if (removeBtn) {
         removeBtn.addEventListener('click', function() {
@@ -822,6 +826,87 @@ function setupCustomerField() {
             updatePaymentCalculations();
         }
     });
+}
+
+// ==================== RESTORE HELD SALE FUNCTIONALITY ====================
+const heldSaleData = {{ held_sale_data|safe }};
+
+if (heldSaleData && heldSaleData.items && heldSaleData.items.length > 0) {
+    console.log('Restoring held sale:', heldSaleData);
+    
+    // Restore location
+    if (heldSaleData.location_id) {
+        $('#id_location').val(heldSaleData.location_id).trigger('change');
+    }
+    
+    // Restore document type
+    if (heldSaleData.document_type) {
+        $('#id_document_type').val(heldSaleData.document_type).trigger('change');
+    }
+    
+    // Restore currency
+    if (heldSaleData.currency) {
+        $('#id_currency').val(heldSaleData.currency).trigger('change');
+    }
+    
+    // Restore notes
+    if (heldSaleData.notes) {
+        $('textarea[name="notes"]').val(heldSaleData.notes);
+    }
+    
+    // Restore customer
+    if (heldSaleData.customer_id) {
+        $('#id_customer').val(heldSaleData.customer_id).trigger('change');
+    } else if (heldSaleData.customer_name) {
+        $('#id_customer').val('new').trigger('change');
+        $('#custom_customer_name').val(heldSaleData.customer_name).show();
+        if (heldSaleData.customer_phone) {
+            $('#custom_customer_phone').val(heldSaleData.customer_phone).show();
+        }
+    }
+    
+    // Wait for location and customer to load, then restore items
+    setTimeout(() => {
+        for (const item of heldSaleData.items) {
+            addItemFromHold(item);
+        }
+        // Refresh totals after restoring all items
+        setTimeout(() => {
+            updateGrandTotal();
+            updatePaymentCalculations();
+        }, 1000);
+    }, 1500);
+}
+
+function addItemFromHold(item) {
+    // Create a new row
+    const newRow = createProductRow();
+    document.getElementById('productsTableBody').appendChild(newRow);
+    setupRowEvents(newRow);
+    
+    // Set the product
+    const productSelect = $(newRow).find('.product-select');
+    productSelect.val(item.product_id).trigger('change');
+    
+    // Wait for product to load, then set unit, quantity, and price
+    setTimeout(() => {
+        const unitSelect = $(newRow).find('.unit-select');
+        // Find the unit with matching ID or name
+        let found = false;
+        unitSelect.find('option').each(function() {
+            if ($(this).val() == item.unit_id || 
+                $(this).text().toLowerCase().includes(item.unit_name.toLowerCase())) {
+                $(this).prop('selected', true);
+                unitSelect.trigger('change');
+                found = true;
+                return false;
+            }
+        });
+        
+        // Set quantity and price
+        $(newRow).find('.quantity').val(item.quantity).trigger('input');
+        $(newRow).find('.unit-price').val(item.unit_price).trigger('input');
+    }, 800);
 }
 
 // ==================== DOCUMENT READY ====================
@@ -919,7 +1004,7 @@ $(document).ready(function() {
         }
     });
     
-    // Form submit
+    // Form submit with validations
     $('#saleForm').on('submit', function(e) {
         var customName = $('#custom_customer_name').val();
         if (customName) {
@@ -948,13 +1033,38 @@ $(document).ready(function() {
         var items = JSON.parse($('#itemsData').val() || '[]');
         if (items.length === 0) {
             e.preventDefault();
-            alert('Please add at least one product');
+            alert('❌ Please add at least one product');
             return false;
         }
         
         if (!currentLocationId) {
             e.preventDefault();
-            alert('Please select a location');
+            alert('❌ Please select a location');
+            return false;
+        }
+        
+        // Validate all rows
+        var hasStockError = false;
+        var hasPriceError = false;
+        
+        document.querySelectorAll('.product-row').forEach(function(row) {
+            if (!validateStock(row)) {
+                hasStockError = true;
+            }
+            if (!validatePrice(row)) {
+                hasPriceError = true;
+            }
+        });
+        
+        if (hasStockError) {
+            e.preventDefault();
+            alert('❌ Some products have insufficient stock. Please reduce quantities or remove items.');
+            return false;
+        }
+        
+        if (hasPriceError) {
+            e.preventDefault();
+            alert('❌ Some products have prices below cost price. Please adjust prices.');
             return false;
         }
         
@@ -966,6 +1076,8 @@ $(document).ready(function() {
             printInput.value = 'true';
             this.appendChild(printInput);
         }
+        
+        console.log('Form submitted successfully');
     });
     
     // Add initial row
@@ -985,7 +1097,16 @@ $(document).ready(function() {
 .btn-sm { padding: 0.25rem 0.5rem; }
 .alert-sm { padding: 0.3rem 0.5rem; font-size: 0.75rem; }
 .stock-info { font-weight: bold; }
-.is-invalid { border-color: #ef4444; background-color: rgba(239, 68, 68, 0.1); }
+.is-invalid {
+    border-color: #ef4444 !important;
+    background-color: rgba(239, 68, 68, 0.1) !important;
+}
+.stock-error, .price-error {
+    display: block;
+    font-size: 0.7rem;
+    margin-top: 3px;
+    color: #ef4444;
+}
 .payment-label:hover { opacity: 0.8; transform: scale(1.02); transition: all 0.2s; cursor: pointer; }
 .customer-container .select2-container { width: 100% !important; }
 </style>

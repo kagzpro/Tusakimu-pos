@@ -423,13 +423,20 @@ class Sale(models.Model):
         ('paid', 'Paid'),
         ('overdue', 'Overdue'),
         ('cancelled', 'Cancelled'),
+        ('on_hold', 'On Hold'),  
     ]
     
     customer = models.ForeignKey('transactions.Customer', on_delete=models.SET_NULL, null=True, blank=True)
-    # Add these fields for customer name/phone when customer is not in database
+    
+    # Customer fields for walk-in customers
     customer_name = models.CharField(max_length=200, blank=True, help_text="Customer name for walk-in customers")
     customer_phone = models.CharField(max_length=20, blank=True, help_text="Customer phone for walk-in customers")
     customer_balance_at_sale = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Customer's balance at the time of sale")
+    
+    # Hold fields - FIXED (removed extra space before hold_reason)
+    hold_reason = models.CharField(max_length=200, blank=True, help_text="Reason for putting sale on hold")
+    held_until = models.DateTimeField(null=True, blank=True, help_text="When the hold expires")
+    released_at = models.DateTimeField(null=True, blank=True, help_text="When the hold was released")
     
     location = models.ForeignKey('core.Location', on_delete=models.SET_NULL, null=True)
     date = models.DateTimeField(default=timezone.now)
@@ -517,7 +524,6 @@ class Sale(models.Model):
         elif self.customer:
             return self.customer.name
         return 'Walk-in Customer'
-
 class SaleItem(models.Model):
     sale = models.ForeignKey(Sale, related_name='items', on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)

@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-clock me-2"></i>Extend Hold Period
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <strong>Sale #{{ sale.document_number }}</strong><br>
+                        Customer: {{ sale.customer_name|default:sale.customer.name|default:"Walk-in" }}<br>
+                        Current expiry: {{ current_until|date:"Y-m-d H:i" }}<br>
+                        <strong>{{ days_remaining }} days remaining</strong>
+                    </div>
+                    
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Extend by:</label>
+                            <select name="additional_days" class="form-select" required>
+                                {% for option in extend_options %}
+                                <option value="{{ option.days }}" {% if option.days == 7 %}selected{% endif %}>
+                                    {{ option.label }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="alert alert-warning">
+                            <i class="fas fa-info-circle"></i>
+                            Extending the hold will keep the sale available for the selected period.
+                            Stock will not be deducted until the sale is completed.
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-clock"></i> Extend Hold
+                            </button>
+                            <a href="{% url 'inventory:held_sales_list' %}" class="btn btn-secondary">
+                                Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

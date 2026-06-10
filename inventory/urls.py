@@ -14,7 +14,10 @@ urlpatterns = [
     path('products/delete/<int:pk>/', views.product_delete, name='product_delete'),
     path('products/<int:product_id>/', views.product_detail, name='product_detail'),
     path('products/batch-delete/', views.product_batch_delete, name='product_batch_delete'),
-    
+    path('sales/hold/<int:sale_id>/', views.sale_hold, name='sale_hold'),
+    path('sales/unhold/<int:sale_id>/', views.sale_unhold, name='sale_unhold'),
+    path('sales/held/', views.held_sales_list, name='held_sales_list'),
+    path('sales/hold/extend/<int:sale_id>/', views.sale_hold_extend, name='sale_hold_extend'),
     # Purchases
     path('purchases/', views.purchase_list, name='purchase_list'),
     path('purchases/add/', views.purchase_add, name='purchase_add'),
@@ -84,7 +87,8 @@ urlpatterns = [
     path('categories/add/', views.category_add, name='category_add'),
     path('categories/<int:pk>/edit/', views.category_edit, name='category_edit'),
     path('categories/<int:pk>/delete/', views.category_delete, name='category_delete'),
-    
+    path('sales/unhold/<int:sale_id>/', views.sale_unhold, name='sale_unhold'),
+    path('sales/hold/extend/<int:sale_id>/', views.sale_hold_extend, name='sale_hold_extend'),
     # Suppliers
     path('suppliers/', views.supplier_list, name='supplier_list'),
     path('suppliers/add/', views.supplier_add, name='supplier_add'),

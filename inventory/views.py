@@ -1253,6 +1253,7 @@ def sale_list(request):
     payment_status_filter = request.GET.get('payment_status', '')
     location_filter = request.GET.get('location', '')
     customer_filter = request.GET.get('customer', '')
+    invoice_search = request.GET.get('invoice_search', '')  # ADD THIS LINE
     
     # Apply filters
     if date_from:
@@ -1286,6 +1287,10 @@ def sale_list(request):
             Q(customer_name__icontains=customer_filter)
         )
     
+    # ADD INVOICE SEARCH FILTER
+    if invoice_search:
+        sales = sales.filter(document_number__icontains=invoice_search)
+    
     # Calculate totals
     total_revenue = sales.aggregate(total=Sum('total_amount'))['total'] or 0
     total_paid = sales.aggregate(total=Sum('paid_amount'))['total'] or 0
@@ -1318,9 +1323,11 @@ def sale_list(request):
         'payment_status_filter': payment_status_filter,
         'location_filter': location_filter,
         'customer_filter': customer_filter,
-        'has_filters': any([date_from, date_to, status_filter, payment_status_filter, location_filter, customer_filter]),
+        'invoice_search': invoice_search,  # ADD THIS LINE
+        'has_filters': any([date_from, date_to, status_filter, payment_status_filter, location_filter, customer_filter, invoice_search]),  # UPDATE THIS LINE
     }
     return render(request, 'inventory/sale_list.html', context)
+
 
 @login_required
 @transaction.atomic
@@ -1333,11 +1340,53 @@ def sale_add(request):
     
     user_locations = get_user_locations(request.user)
     
+    # Check if we're resuming a held sale
+    resume_hold_id = request.GET.get('resume')
+    held_sale_data = None
+    held_sale = None
+    
+    if resume_hold_id:
+        try:
+            held_sale = Sale.objects.get(id=resume_hold_id, document_status='on_hold')
+            if can_user_access_location(request.user, held_sale.location):
+                # Build the held sale data for the template
+                held_sale_data = {
+                    'id': held_sale.id,
+                    'customer_id': held_sale.customer.id if held_sale.customer else None,
+                    'customer_name': held_sale.customer_name,
+                    'customer_phone': held_sale.customer_phone,
+                    'location_id': held_sale.location.id,
+                    'document_type': held_sale.document_type,
+                    'currency': held_sale.currency,
+                    'notes': held_sale.notes,
+                    'items': []
+                }
+                for item in held_sale.items.all():
+                    held_sale_data['items'].append({
+                        'product_id': item.product.id,
+                        'product_name': item.product.name,
+                        'unit_id': item.unit_id,
+                        'unit_name': item.unit_name,
+                        'quantity': float(item.quantity),
+                        'unit_price': float(item.unit_price),
+                        'total': float(item.total_price),
+                    })
+                print(f"Loaded held sale {held_sale.id} with {len(held_sale_data['items'])} items")
+                
+                # Delete the held sale so it doesn't appear twice
+                # We'll recreate it when saving
+                held_sale.delete()
+        except Sale.DoesNotExist:
+            pass
+    
     if request.method == 'POST':
         print("=== SALE ADD POST DATA ===")
         print(request.POST)
         
         try:
+            # Check if this is a hold action
+            is_hold = 'save_hold' in request.POST
+            
             # Get customer information
             customer_id = request.POST.get('customer')
             customer_name = request.POST.get('customer_name', '').strip()
@@ -1394,8 +1443,9 @@ def sale_add(request):
                 currency=currency,
                 date=sale_datetime,
                 notes=notes,
-                document_status='draft' if is_draft else 'sent',
-                created_by=request.user
+                document_status='on_hold' if is_hold else ('draft' if is_draft else 'sent'),
+                created_by=request.user,
+                customer_balance_at_sale=float(customer_balance) if customer_balance else 0
             )
             sale.save()
             
@@ -1445,8 +1495,8 @@ def sale_add(request):
                 
                 total_amount += item_total
                 
-                # Reduce stock
-                if not is_draft and document_type != 'quotation':
+                # ONLY reduce stock if NOT on hold and NOT draft
+                if not is_hold and not is_draft and document_type != 'quotation':
                     try:
                         ProductStock.objects.filter(
                             product=product, 
@@ -1456,18 +1506,27 @@ def sale_add(request):
                     except Exception as e:
                         stock_errors.append(f"Stock error for {product.name}: {str(e)}")
             
-            # Check for stock errors
+            # Update sale total
+            sale.total_amount = float(total_amount)
+            sale.save()
+            
+            # If this is a hold, set hold reason and expiration
+            if is_hold:
+                sale.hold_reason = 'In-progress sale saved for later'
+                sale.held_until = timezone.now() + timezone.timedelta(days=7)
+                sale.save()
+                messages.success(request, f"Sale saved on hold! You can resume it from the 'Held Sales' page.")
+                return redirect('inventory:held_sales_list')
+            
+            # Check for stock errors (only for non-hold sales)
             if stock_errors:
+                # Rollback by deleting the sale
                 sale.delete()
                 for error in stock_errors:
                     messages.error(request, error)
                 return redirect('inventory:sale_add')
             
-            # Update sale total
-            sale.total_amount = float(total_amount)
-            sale.save()
-            
-            # Process payments
+            # Process payments (only for non-hold sales)
             payment_data = request.POST.get('payment_data', '[]')
             payments = json.loads(payment_data)
             
@@ -1519,8 +1578,11 @@ def sale_add(request):
         products = Product.objects.all().select_related('category').prefetch_related('units')
         customers = Customer.objects.all()
         
-        # REMOVED THE PROBLEMATIC LINE - just pass customers as is
-        # The balance will be fetched via API when customer is selected
+        # Convert held sale data to JSON for template
+        held_sale_data_json = 'null'
+        if held_sale_data:
+            held_sale_data_json = json.dumps(held_sale_data)
+            print(f"Passing held sale data to template: {held_sale_data_json}")
         
         return render(request, 'inventory/sale_add.html', {
             'document_types': DocumentType.choices,
@@ -1529,7 +1591,90 @@ def sale_add(request):
             'customers': customers,
             'products': products,
             'default_date': timezone.now().strftime('%Y-%m-%dT%H:%M'),
+            'held_sale_data': held_sale_data_json,
         })
+
+
+@login_required
+@transaction.atomic
+def sale_unhold(request, sale_id):
+    """Release a held sale and redirect to edit"""
+    sale = get_object_or_404(Sale, id=sale_id)
+    
+    # Check permission
+    if not can_user_access_location(request.user, sale.location):
+        messages.error(request, "You don't have permission to modify this sale")
+        return redirect('inventory:held_sales_list')
+    
+    # Check if sale is actually on hold
+    if sale.document_status != 'on_hold':
+        messages.warning(request, f"Sale {sale.document_number} is not on hold.")
+        return redirect('inventory:held_sales_list')
+    
+    # Check if hold has expired
+    is_expired = sale.held_until and sale.held_until < timezone.now()
+    
+    if request.method == 'POST':
+        action = request.POST.get('action', 'edit')
+        
+        # Update sale status
+        sale.document_status = 'draft'
+        sale.released_at = timezone.now()
+        sale.save()
+        
+        if action == 'edit':
+            messages.success(request, f"Sale {sale.document_number} has been released from hold. You can now edit and complete it.")
+            return redirect('inventory:sale_edit', pk=sale.id)
+        else:
+            messages.success(request, f"Sale {sale.document_number} has been released from hold.")
+            return redirect('inventory:sale_list')
+    
+    context = {
+        'sale': sale,
+        'is_expired': is_expired,
+        'expired_days': (timezone.now() - sale.held_until).days if is_expired and sale.held_until else 0,
+        'held_days': (timezone.now() - sale.created_at).days if sale.created_at else 0,
+    }
+    return render(request, 'inventory/sale_unhold.html', context)
+
+@login_required
+@transaction.atomic
+def sale_hold_extend(request, sale_id):
+    """Extend the hold period for a sale"""
+    sale = get_object_or_404(Sale, id=sale_id, document_status='on_hold')
+    
+    if not can_user_access_location(request.user, sale.location):
+        messages.error(request, "You don't have permission to modify this sale")
+        return redirect('inventory:held_sales_list')
+    
+    if request.method == 'POST':
+        additional_days = int(request.POST.get('additional_days', 7))
+        new_hold_until = timezone.now() + timezone.timedelta(days=additional_days)
+        
+        sale.held_until = new_hold_until
+        sale.save()
+        
+        messages.success(
+            request, 
+            f"Hold period extended to {new_hold_until.strftime('%Y-%m-%d %H:%M')}"
+        )
+        return redirect('inventory:held_sales_list')
+    
+    context = {
+        'sale': sale,
+        'current_until': sale.held_until,
+        'days_remaining': (sale.held_until - timezone.now()).days if sale.held_until else 0,
+        'extend_options': [
+            {'days': 1, 'label': '1 Day'},
+            {'days': 3, 'label': '3 Days'},
+            {'days': 7, 'label': '1 Week'},
+            {'days': 14, 'label': '2 Weeks'},
+            {'days': 30, 'label': '1 Month'},
+        ]
+    }
+    return render(request, 'inventory/sale_hold_extend.html', context)
+
+
 
 
 # At the top level of the file (no indentation)
@@ -9720,3 +9865,140 @@ def bulk_add_product(request):
             'success': False,
             'error': str(e)
         }, status=500)
+
+
+# =======================
+# SALE HOLD/UNHOLD VIEWS (FIXED)
+# =======================
+
+@login_required
+@transaction.atomic
+def sale_hold(request, sale_id):
+    """Put a sale on hold (save as draft with hold status)"""
+    sale = get_object_or_404(Sale, id=sale_id)
+    
+    # Check permission
+    if not can_user_access_location(request.user, sale.location):
+        messages.error(request, "You don't have permission to modify this sale")
+        return redirect('inventory:sale_list')
+    
+    if request.method == 'POST':
+        hold_reason = request.POST.get('hold_reason', '')
+        hold_days = int(request.POST.get('hold_days', 7))
+        
+        # Calculate hold expiration date
+        hold_until = timezone.now() + timezone.timedelta(days=hold_days)
+        
+        # Update sale status
+        sale.document_status = 'on_hold'
+        sale.hold_reason = hold_reason
+        sale.held_until = hold_until
+        sale.save()
+        
+        messages.success(
+            request, 
+            f"Sale {sale.document_number} has been put on hold until {hold_until.strftime('%Y-%m-%d %H:%M')}. "
+            f"Reason: {hold_reason or 'Customer requested hold'}"
+        )
+        return redirect('inventory:sale_list')
+    
+    context = {
+        'sale': sale,
+        'hold_options': [
+            {'days': 1, 'label': '1 Day'},
+            {'days': 3, 'label': '3 Days'},
+            {'days': 7, 'label': '1 Week'},
+            {'days': 14, 'label': '2 Weeks'},
+            {'days': 30, 'label': '1 Month'},
+        ]
+    }
+    return render(request, 'inventory/sale_hold.html', context)
+
+
+@login_required
+@transaction.atomic
+def sale_unhold(request, sale_id):
+    """Release a held sale (unload from hold)"""
+    sale = get_object_or_404(Sale, id=sale_id)
+    
+    # Check permission
+    if not can_user_access_location(request.user, sale.location):
+        messages.error(request, "You don't have permission to modify this sale")
+        return redirect('inventory:sale_list')
+    
+    if request.method == 'POST':
+        # Check if hold has expired
+        if sale.held_until and sale.held_until < timezone.now():
+            messages.warning(
+                request, 
+                f"This sale has been on hold since {sale.held_until.strftime('%Y-%m-%d %H:%M')}. "
+                f"Please review items for stock availability."
+            )
+        
+        # Release the hold
+        sale.document_status = 'draft'
+        sale.released_at = timezone.now()
+        sale.save()
+        
+        messages.success(
+            request, 
+            f"Sale {sale.document_number} has been released from hold. You can now edit and complete it."
+        )
+        return redirect('inventory:sale_edit', pk=sale.id)
+    
+    context = {
+        'sale': sale,
+        'hold_duration': (timezone.now() - sale.held_until).days if sale.held_until else 0,
+        'is_expired': sale.held_until and sale.held_until < timezone.now(),
+    }
+    return render(request, 'inventory/sale_unhold.html', context)
+
+
+@login_required
+def held_sales_list(request):
+    """List all sales currently on hold"""
+    user_locations = get_user_locations(request.user)
+    
+    held_sales = Sale.objects.filter(
+        document_status='on_hold',
+        location__in=user_locations
+    ).select_related('customer', 'location').order_by('held_until')
+    
+    expired_sales = held_sales.filter(held_until__lt=timezone.now())
+    active_holds = held_sales.filter(held_until__gte=timezone.now())
+    
+    context = {
+        'active_holds': active_holds,
+        'expired_sales': expired_sales,
+        'total_holds': held_sales.count(),
+        'active_count': active_holds.count(),
+        'expired_count': expired_sales.count(),
+    }
+    return render(request, 'inventory/held_sales_list.html', context)
+
+
+@login_required
+@transaction.atomic
+def sale_hold_extend(request, sale_id):
+    """Extend the hold period for a sale"""
+    sale = get_object_or_404(Sale, id=sale_id, document_status='on_hold')
+    
+    # Check permission
+    if not can_user_access_location(request.user, sale.location):
+        messages.error(request, "You don't have permission to modify this sale")
+        return redirect('inventory:held_sales_list')
+    
+    if request.method == 'POST':
+        additional_days = int(request.POST.get('additional_days', 7))
+        new_hold_until = timezone.now() + timezone.timedelta(days=additional_days)
+        
+        sale.held_until = new_hold_until
+        sale.save()
+        
+        messages.success(
+            request, 
+            f"Hold period extended to {new_hold_until.strftime('%Y-%m-%d %H:%M')}"
+        )
+        return redirect('inventory:held_sales_list')
+    
+    return render(request, 'inventory/sale_hold_extend.html', {'sale': sale})

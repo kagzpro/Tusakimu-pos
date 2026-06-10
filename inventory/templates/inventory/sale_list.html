@@ -20,6 +20,9 @@
             <a href="{% url 'inventory:sales_report' %}" class="btn btn-info me-2">
                 <i class="fas fa-chart-line"></i> Sales Report
             </a>
+            <a href="{% url 'inventory:held_sales_list' %}" class="btn btn-warning me-2">
+                <i class="fas fa-pause-circle"></i> Held Sales
+            </a>
             <a href="{% url 'inventory:sale_add' %}" class="btn btn-primary">
                 <i class="fas fa-plus"></i> Add New Sale
             </a>
@@ -49,6 +52,7 @@
                         <option value="sent" {% if status_filter == 'sent' %}selected{% endif %}>Sent</option>
                         <option value="paid" {% if status_filter == 'paid' %}selected{% endif %}>Paid</option>
                         <option value="overdue" {% if status_filter == 'overdue' %}selected{% endif %}>Overdue</option>
+                        <option value="held" {% if status_filter == 'held' %}selected{% endif %}>Held</option>
                     </select>
                 </div>
                 <div class="col-md-2">
@@ -75,6 +79,14 @@
                     <label class="form-label">Customer</label>
                     <input type="text" name="customer" class="form-control" placeholder="Customer name..." value="{{ customer_filter }}">
                 </div>
+                <div class="col-md-12">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">Search Invoice #</label>
+                            <input type="text" name="invoice_search" class="form-control" placeholder="Enter invoice number..." value="{{ invoice_search }}">
+                        </div>
+                    </div>
+                </div>
                 <div class="col-12">
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">
@@ -99,6 +111,7 @@
                 {% if payment_status_filter %}<span class="badge bg-info me-1">Payment: {{ payment_status_filter|title }}</span>{% endif %}
                 {% if location_filter %}<span class="badge bg-info me-1">Location filtered</span>{% endif %}
                 {% if customer_filter %}<span class="badge bg-info me-1">Customer: {{ customer_filter }}</span>{% endif %}
+                {% if invoice_search %}<span class="badge bg-info me-1">Invoice: {{ invoice_search }}</span>{% endif %}
             </div>
             {% endif %}
         </div>
@@ -177,7 +190,7 @@
                                 <br>
                                 <small class="text-muted">{{ sale.date|date:"H:i" }}</small>
                             </td>
-                            <td>{{ sale.date|date:"Y-m-d" }}</span></td>
+                            <td>{{ sale.date|date:"Y-m-d" }}</td>
                             <td>
                                 {% if sale.customer %}
                                     {{ sale.customer.name }}
@@ -186,10 +199,10 @@
                                 {% else %}
                                     <span class="text-muted">Walk-in</span>
                                 {% endif %}
-                            </span></td>
+                            </td>
                             <td>
                                 <span class="badge bg-info">{{ sale.get_document_type_display }}</span>
-                            </span></td>
+                            </td>
                             <td>
                                 {% if sale.document_status == 'draft' %}
                                     <span class="badge bg-secondary">Draft</span>
@@ -199,10 +212,12 @@
                                     <span class="badge bg-success">Paid</span>
                                 {% elif sale.document_status == 'overdue' %}
                                     <span class="badge bg-danger">Overdue</span>
+                                {% elif sale.document_status == 'held' %}
+                                    <span class="badge bg-warning text-dark">Held</span>
                                 {% else %}
                                     <span class="badge bg-warning">{{ sale.document_status|title }}</span>
                                 {% endif %}
-                            </span></td>
+                            </td>
                             <td>
                                 {% if sale.paid_amount >= sale.total_amount %}
                                     <span class="badge bg-success">Fully Paid</span>
@@ -211,24 +226,24 @@
                                 {% else %}
                                     <span class="badge bg-danger">Not Paid</span>
                                 {% endif %}
-                            </span></td>
-                            <td class="text-end fw-bold">UGX {{ sale.total_amount|floatformat:0 }}</span></td>
-                            <td class="text-end">UGX {{ sale.paid_amount|floatformat:0 }}</span></td>
+                            </td>
+                            <td class="text-end fw-bold">UGX {{ sale.total_amount|floatformat:0 }}</td>
+                            <td class="text-end">UGX {{ sale.paid_amount|floatformat:0 }}</td>
                             <td class="text-end">
                                 {% if sale.balance_due > 0 %}
                                     <span class="text-danger fw-bold">UGX {{ sale.balance_due|floatformat:0 }}</span>
                                 {% else %}
                                     <span class="text-success">0</span>
                                 {% endif %}
-                            </span></td>
-                            <td>{{ sale.location.name|default:"-" }}</span></td>
+                            </td>
+                            <td>{{ sale.location.name|default:"-" }}</td>
                             <td class="text-center">
                                 <button type="button" class="btn btn-sm btn-outline-info" 
                                         data-bs-toggle="modal" 
                                         data-bs-target="#itemsModal{{ sale.id }}">
                                     <i class="fas fa-boxes"></i> {{ sale.items.count }}
                                 </button>
-                            </span></td>
+                            </td>
                             <td class="text-center">
                                 <div class="btn-group btn-group-sm">
                                     <a href="{% url 'inventory:print_sale' sale.id %}" class="btn btn-info" target="_blank" title="Print">
@@ -240,6 +255,18 @@
                                     <a href="{% url 'inventory:sale_edit' sale.id %}" class="btn btn-warning" title="Edit">
                                         <i class="fas fa-edit"></i>
                                     </a>
+                                    
+                                    <!-- Hold/Unhold Button -->
+                                    {% if sale.document_status == 'held' %}
+                                        <a href="{% url 'inventory:sale_unhold' sale.id %}" class="btn btn-success" title="Resume Sale">
+                                            <i class="fas fa-play"></i>
+                                        </a>
+                                    {% else %}
+                                        <a href="{% url 'inventory:sale_hold' sale.id %}" class="btn btn-secondary" title="Hold Sale">
+                                            <i class="fas fa-pause"></i>
+                                        </a>
+                                    {% endif %}
+                                    
                                     <button type="button" class="btn btn-danger" 
                                             data-bs-toggle="modal" 
                                             data-bs-target="#deleteModal{{ sale.id }}" title="Delete">
@@ -270,18 +297,18 @@
                                                         <tbody>
                                                             {% for item in sale.items.all %}
                                                             <tr>
-                                                                <td>{{ item.product.name }}</span>
-                                                                <td>{{ item.unit_name|default:item.product.base_unit|title }}</span>
-                                                                <td class="text-center">{{ item.quantity|floatformat:0 }}</span>
-                                                                <td class="text-end">UGX {{ item.unit_price|floatformat:0 }}</span>
-                                                                <td class="text-end">UGX {{ item.total_price|floatformat:0 }}</span>
+                                                                <td>{{ item.product.name }}</td>
+                                                                <td>{{ item.unit_name|default:item.product.base_unit|title }}</td>
+                                                                <td class="text-center">{{ item.quantity|floatformat:0 }}</td>
+                                                                <td class="text-end">UGX {{ item.unit_price|floatformat:0 }}</td>
+                                                                <td class="text-end">UGX {{ item.total_price|floatformat:0 }}</td>
                                                             </tr>
                                                             {% endfor %}
                                                         </tbody>
                                                         <tfoot class="table-light">
                                                             <tr>
                                                                 <td colspan="4" class="text-end fw-bold">Total:</td>
-                                                                <td class="text-end fw-bold">UGX {{ sale.total_amount|floatformat:0 }}</span></td>
+                                                                <td class="text-end fw-bold">UGX {{ sale.total_amount|floatformat:0 }}</td>
                                                             </tr>
                                                         </tfoot>
                                                     </table>
@@ -313,17 +340,17 @@
                                         </div>
                                     </div>
                                 </div>
-                             </span></td>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                     <tfoot class="table-light">
                         <tr class="fw-bold">
                             <td colspan="6" class="text-end">Totals:</td>
-                            <td class="text-end text-success">UGX {{ total_revenue|floatformat:0 }}</span></td>
-                            <td class="text-end text-info">UGX {{ total_paid|floatformat:0 }}</span></td>
-                            <td class="text-end text-danger">UGX {{ total_balance|floatformat:0 }}</span></td>
-                            <td colspan="3"></span></td>
+                            <td class="text-end text-success">UGX {{ total_revenue|floatformat:0 }}</td>
+                            <td class="text-end text-info">UGX {{ total_paid|floatformat:0 }}</td>
+                            <td class="text-end text-danger">UGX {{ total_balance|floatformat:0 }}</td>
+                            <td colspan="3"></td>
                         </tr>
                     </tfoot>
                 </table>
