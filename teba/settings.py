@@ -1,5 +1,5 @@
 """
-Django settings for teba project - OPTIMIZED FOR LOCAL DEVELOPMENT & RAILWAY
+Django settings for teba project - OPTIMIZED FOR RAILWAY PRODUCTION
 (ENGLISH ONLY)
 """
 
@@ -73,6 +73,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'core.middleware.DatabaseConnectionMiddleware',  # ADDED - Close old connections
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -114,23 +115,48 @@ TEMPLATES = [
 WSGI_APPLICATION = 'teba.wsgi.application'
 
 # =======================
-# DATABASE - PostgreSQL (Main Database)
+# DATABASE - PostgreSQL (Optimized for Railway)
 # =======================
 
-# Your PostgreSQL database - MAIN DATABASE (no SQLite fallback)
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:cSGoxJEywsZbMqWEkmcDtqRpwUWQBihM@zephyr.proxy.rlwy.net:19136/railway')
+# Your PostgreSQL database - MAIN DATABASE
+DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:cSZoxJEywsZbMqWEkmcDtqRpwUWQBihM@zephyr.proxy.rlwy.net:19136/railway')
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default=DATABASE_URL,
-        conn_max_age=600,
-    )
-}
+# Database configuration based on environment
+if IS_RAILWAY:
+    # PRODUCTION: Disable persistent connections to prevent connection leaks
+    # Each request gets a fresh connection that's closed immediately
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=0,  # CRITICAL: No persistent connections on Railway
+            conn_health_checks=True,  # Check connection health before using
+        )
+    }
+else:
+    # DEVELOPMENT: Keep connections alive longer for better performance
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,  # Keep connections for 10 minutes in development
+            conn_health_checks=True,
+        )
+    }
 
-# Add SSL requirement for secure connection
+# Add SSL and connection options
 if 'OPTIONS' not in DATABASES['default']:
     DATABASES['default']['OPTIONS'] = {}
+
+# SSL configuration
 DATABASES['default']['OPTIONS']['sslmode'] = 'require'
+
+# Connection pool optimizations to reduce connection overhead
+DATABASES['default']['OPTIONS'].update({
+    'connect_timeout': 10,  # Timeout after 10 seconds
+    'keepalives': 1,  # Enable TCP keepalives
+    'keepalives_idle': 60,  # Send first keepalive after 60 seconds
+    'keepalives_interval': 10,  # Send keepalives every 10 seconds
+    'keepalives_count': 5,  # Drop connection after 5 failed keepalives
+})
 
 # =======================
 # PASSWORD VALIDATION
@@ -296,10 +322,48 @@ mimetypes.add_type("application/javascript", ".js", True)
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 # =======================
-# LOGGING (Optional - for debugging production)
+# LOGGING (Optimized for Railway)
 # =======================
 
 if IS_RAILWAY:
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'formatter': 'verbose',
+            },
+        },
+        'formatters': {
+            'verbose': {
+                'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+                'style': '{',
+            },
+            'simple': {
+                'format': '{levelname} {message}',
+                'style': '{',
+            },
+        },
+        'root': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Reduce logging noise in production
+        },
+        'loggers': {
+            'django': {
+                'handlers': ['console'],
+                'level': os.getenv('DJANGO_LOG_LEVEL', 'WARNING'),
+                'propagate': False,
+            },
+            'django.db.backends': {
+                'handlers': ['console'],
+                'level': 'ERROR',  # Don't log every SQL query
+                'propagate': False,
+            },
+        },
+    }
+else:
+    # Development logging - more verbose
     LOGGING = {
         'version': 1,
         'disable_existing_loggers': False,
@@ -311,12 +375,6 @@ if IS_RAILWAY:
         'root': {
             'handlers': ['console'],
             'level': 'INFO',
-        },
-        'loggers': {
-            'django': {
-                'handlers': ['console'],
-                'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
-            },
         },
     }
 
@@ -330,6 +388,8 @@ print("=" * 50)
 print(f"Environment: {'RAILWAY (Production)' if IS_RAILWAY else 'LOCAL (Development)'}")
 print(f"Debug Mode: {DEBUG}")
 print(f"Database: {DATABASES['default']['ENGINE']}")
+print(f"Database Connection Max Age: {DATABASES['default'].get('CONN_MAX_AGE', 'Not set')}")
 print(f"Static Files: {'Whitenoise (Production)' if IS_RAILWAY else 'Development mode'}")
 print(f"SECURE_SSL_REDIRECT: {SECURE_SSL_REDIRECT}")
+print(f"Gunicorn Workers: {os.environ.get('GUNICORN_WORKERS', 'Not set (using default)')}")
 print("=" * 50)
