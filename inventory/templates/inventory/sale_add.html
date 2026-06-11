@@ -50,9 +50,9 @@
                             </div>
                             <div class="col-md-4">
                                 <select name="document_type" class="form-select form-select-sm" id="id_document_type">
-                                    <option value="receipt" selected>🧾 Receipt</option>
-                                    <option value="invoice">📄 Invoice</option>
-                                    <option value="quotation">📝 Quotation</option>
+                                    <option value="receipt" selected class="receipt-option">🧾 Receipt (Auto-paid with cash)</option>
+                                    <option value="invoice">📄 Invoice (Payment later)</option>
+                                    <option value="quotation">📝 Quotation (Not a sale)</option>
                                 </select>
                             </div>
                         </div>
@@ -125,7 +125,7 @@
                             <textarea name="notes" class="form-control form-control-sm" rows="2" placeholder="Notes..."></textarea>
                         </div>
 
-                        <!-- Action Buttons - INSIDE THE FORM -->
+                        <!-- Action Buttons -->
                         <div class="d-flex gap-2">
                             <button type="submit" name="save_sent" class="btn btn-success btn-sm flex-grow-1" id="createSaleBtn">
                                 <i class="fas fa-check"></i> Complete Sale
@@ -306,6 +306,28 @@ function parseMoney(value) {
     return parseFloat(String(value).replace(/[^\d.-]/g, '')) || 0;
 }
 
+// ==================== AUTO-PAY FOR RECEIPTS ====================
+function autoPayForReceipt() {
+    var documentType = $('#id_document_type').val();
+    var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
+    
+    if (documentType === 'receipt' && currentBill > 0) {
+        var currentPaid = parseMoney($('#payment_cash').val()) || 0;
+        var mobilePaid = parseMoney($('#payment_mobile').val()) || 0;
+        var bankPaid = parseMoney($('#payment_bank').val()) || 0;
+        var cardPaid = parseMoney($('#payment_card').val()) || 0;
+        var totalPaid = currentPaid + mobilePaid + bankPaid + cardPaid;
+        
+        // If not fully paid, auto-set cash payment
+        if (totalPaid < currentBill) {
+            $('#payment_cash').val(currentBill);
+            $('#payment_mobile, #payment_bank, #payment_card').val(0);
+            updatePaymentCalculations();
+            console.log('Receipt auto-paid with cash: ' + currentBill);
+        }
+    }
+}
+
 // ==================== CUSTOMER BALANCE FUNCTIONS ====================
 function fetchCustomerBalance(customerId) {
     if (!customerId || customerId === 'new') {
@@ -320,7 +342,6 @@ function fetchCustomerBalance(customerId) {
     fetch('/inventory/api/customer-balance/?customer_id=' + customerId)
         .then(response => response.json())
         .then(data => {
-            console.log('Balance API response:', data);
             if (data.ok && data.balance !== undefined) {
                 currentCustomerBalance = parseFloat(data.balance) || 0;
                 selectedCustomerId = customerId;
@@ -346,11 +367,6 @@ function fetchCustomerBalance(customerId) {
             updateGrandTotal();
             updatePaymentCalculations();
         });
-}
-
-function updateAllDisplay() {
-    updateGrandTotal();
-    updatePaymentCalculations();
 }
 
 // ==================== STOCK FUNCTIONS ====================
@@ -403,14 +419,14 @@ function createProductRow() {
             <select class="form-select form-select-sm product-select" style="width:100%">
                 ${productOptions}
             </select>
-         </td>
+          </td>
         <td class="unit-cell">
             <select class="form-select form-select-sm unit-select" disabled style="width:100%">
                 <option value="">Select product</option>
             </select>
-         </td>
-        <td class="stock-cell stock-info text-center fw-bold">-</span>
-        <tr>
+          </td>
+        <td class="stock-cell stock-info text-center fw-bold">-</td>
+        <td>
             <input type="number" class="form-control form-control-sm quantity" min="0.01" step="0.01" value="1" disabled>
         </td>
         <td>
@@ -461,7 +477,6 @@ async function updateStockInfo(row) {
     validateStock(row);
 }
 
-// ==================== VALIDATION FUNCTIONS ====================
 function validateStock(row) {
     var quantityInput = row.querySelector('.quantity');
     var stockSpan = row.querySelector('.stock-info');
@@ -533,6 +548,9 @@ function updateGrandTotal() {
     document.getElementById('saleTotalDisplay').innerHTML = currencySymbol + ' ' + formatMoney(total);
     document.getElementById('itemsCount').innerHTML = document.querySelectorAll('.product-row').length + ' items';
     updatePaymentCalculations();
+    
+    // Auto-pay for receipts when total changes
+    autoPayForReceipt();
 }
 
 function updatePaymentCalculations() {
@@ -549,7 +567,6 @@ function updatePaymentCalculations() {
     
     document.getElementById('totalCollected').innerHTML = currencySymbol + ' ' + formatMoney(totalCollected);
     document.getElementById('balanceDue').innerHTML = currencySymbol + ' ' + formatMoney(Math.max(0, remainingDue));
-    document.getElementById('balanceDueDisplay').innerHTML = currencySymbol + ' ' + formatMoney(Math.max(0, remainingDue));
     document.getElementById('currentBillDisplay').innerHTML = currencySymbol + ' ' + formatMoney(currentBill);
     
     if (currentCustomerBalance > 0) {
@@ -579,6 +596,34 @@ function updatePaymentCalculations() {
     
     document.getElementById('id_paid_amount').value = totalCollected;
     updatePaymentStatus();
+}
+
+function updatePaymentStatus() {
+    var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
+    var totalDue = currentBill + currentCustomerBalance;
+    var totalPaid = parseMoney(document.getElementById('totalCollected').innerText.replace(/[^0-9.-]/g, ''));
+    var alertDiv = document.getElementById('paymentStatusAlert');
+    var documentType = $('#id_document_type').val();
+    
+    if (!currentLocationId) {
+        alertDiv.className = 'alert alert-secondary mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '📍 Select location';
+    } else if (currentBill === 0) {
+        alertDiv.className = 'alert alert-warning mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '➕ Add products';
+    } else if (documentType === 'receipt') {
+        alertDiv.className = 'alert alert-success mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '✅ Receipt - Auto-paid with cash';
+    } else if (totalPaid >= totalDue) {
+        alertDiv.className = 'alert alert-success mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '✅ Fully paid';
+    } else if (totalPaid > 0) {
+        alertDiv.className = 'alert alert-info mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '💰 Partially paid';
+    } else {
+        alertDiv.className = 'alert alert-danger mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '⚠️ Not paid - Will be marked as debt';
+    }
 }
 
 function saveItemsData() {
@@ -641,30 +686,6 @@ function updateCurrency() {
     currencySymbol = document.getElementById('id_currency').value;
     document.getElementById('currencySymbol').innerText = currencySymbol;
     updateGrandTotal();
-}
-
-function updatePaymentStatus() {
-    var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
-    var totalDue = currentBill + currentCustomerBalance;
-    var totalPaid = parseMoney(document.getElementById('totalCollected').innerText.replace(/[^0-9.-]/g, ''));
-    var alertDiv = document.getElementById('paymentStatusAlert');
-    
-    if (!currentLocationId) {
-        alertDiv.className = 'alert alert-secondary mb-2 py-2 text-center';
-        document.getElementById('paymentStatusText').innerHTML = '📍 Select location';
-    } else if (currentBill === 0) {
-        alertDiv.className = 'alert alert-warning mb-2 py-2 text-center';
-        document.getElementById('paymentStatusText').innerHTML = '➕ Add products';
-    } else if (totalPaid >= totalDue) {
-        alertDiv.className = 'alert alert-success mb-2 py-2 text-center';
-        document.getElementById('paymentStatusText').innerHTML = '✅ Fully paid';
-    } else if (totalPaid > 0) {
-        alertDiv.className = 'alert alert-info mb-2 py-2 text-center';
-        document.getElementById('paymentStatusText').innerHTML = '💰 Partially paid';
-    } else {
-        alertDiv.className = 'alert alert-danger mb-2 py-2 text-center';
-        document.getElementById('paymentStatusText').innerHTML = '⚠️ Not paid';
-    }
 }
 
 function updateAllStockInfo() {
@@ -795,7 +816,6 @@ function setupCustomerField() {
     
     customerSelect.on('change', function() {
         var selectedValue = $(this).val();
-        console.log('Customer selected:', selectedValue);
         
         if (selectedValue === 'new') {
             customNameInput.show();
@@ -812,7 +832,6 @@ function setupCustomerField() {
             customPhoneInput.hide();
             customNameInput.removeAttr('name');
             customPhoneInput.removeAttr('name');
-            console.log('Fetching balance for customer ID:', selectedValue);
             fetchCustomerBalance(selectedValue);
         } else {
             customNameInput.hide();
@@ -834,27 +853,18 @@ const heldSaleData = {{ held_sale_data|safe }};
 if (heldSaleData && heldSaleData.items && heldSaleData.items.length > 0) {
     console.log('Restoring held sale:', heldSaleData);
     
-    // Restore location
     if (heldSaleData.location_id) {
         $('#id_location').val(heldSaleData.location_id).trigger('change');
     }
-    
-    // Restore document type
     if (heldSaleData.document_type) {
         $('#id_document_type').val(heldSaleData.document_type).trigger('change');
     }
-    
-    // Restore currency
     if (heldSaleData.currency) {
         $('#id_currency').val(heldSaleData.currency).trigger('change');
     }
-    
-    // Restore notes
     if (heldSaleData.notes) {
         $('textarea[name="notes"]').val(heldSaleData.notes);
     }
-    
-    // Restore customer
     if (heldSaleData.customer_id) {
         $('#id_customer').val(heldSaleData.customer_id).trigger('change');
     } else if (heldSaleData.customer_name) {
@@ -865,12 +875,10 @@ if (heldSaleData && heldSaleData.items && heldSaleData.items.length > 0) {
         }
     }
     
-    // Wait for location and customer to load, then restore items
     setTimeout(() => {
         for (const item of heldSaleData.items) {
             addItemFromHold(item);
         }
-        // Refresh totals after restoring all items
         setTimeout(() => {
             updateGrandTotal();
             updatePaymentCalculations();
@@ -879,31 +887,23 @@ if (heldSaleData && heldSaleData.items && heldSaleData.items.length > 0) {
 }
 
 function addItemFromHold(item) {
-    // Create a new row
     const newRow = createProductRow();
     document.getElementById('productsTableBody').appendChild(newRow);
     setupRowEvents(newRow);
     
-    // Set the product
     const productSelect = $(newRow).find('.product-select');
     productSelect.val(item.product_id).trigger('change');
     
-    // Wait for product to load, then set unit, quantity, and price
     setTimeout(() => {
         const unitSelect = $(newRow).find('.unit-select');
-        // Find the unit with matching ID or name
-        let found = false;
         unitSelect.find('option').each(function() {
             if ($(this).val() == item.unit_id || 
                 $(this).text().toLowerCase().includes(item.unit_name.toLowerCase())) {
                 $(this).prop('selected', true);
                 unitSelect.trigger('change');
-                found = true;
                 return false;
             }
         });
-        
-        // Set quantity and price
         $(newRow).find('.quantity').val(item.quantity).trigger('input');
         $(newRow).find('.unit-price').val(item.unit_price).trigger('input');
     }, 800);
@@ -920,10 +920,12 @@ $(document).ready(function() {
         allowClear: true
     }).on('change', updateAllStockInfo);
     
-    $('#id_document_type').select2({ width: '100%' });
+    $('#id_document_type').select2({ width: '100%' }).on('change', function() {
+        autoPayForReceipt();
+    });
+    
     $('#id_currency').select2({ width: '100%' }).on('change', updateCurrency);
     
-    // Auto-select location if only one exists
     var locationSelect = document.getElementById('id_location');
     if (locationSelect && locationSelect.options.length === 2) {
         locationSelect.selectedIndex = 1;
@@ -932,10 +934,8 @@ $(document).ready(function() {
         $('#id_location').trigger('change');
     }
     
-    // Payment input handlers
     $('.payment-input').on('input', updatePaymentCalculations);
     
-    // Quick Pay Buttons
     $('.quick-pay-btn').on('click', function() {
         var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
         var totalDue = currentBill + currentCustomerBalance;
@@ -953,7 +953,6 @@ $(document).ready(function() {
         updatePaymentCalculations();
     });
     
-    // Click on payment label
     $('.payment-label').on('click', function() {
         var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
         var totalDue = currentBill + currentCustomerBalance;
@@ -976,13 +975,11 @@ $(document).ready(function() {
         }
     });
     
-    // Add product button
     $('#addProductBtn').on('click', function(e) {
         e.preventDefault();
         addProductRow();
     });
     
-    // Reset button
     $('#resetButton').on('click', function() {
         if (confirm('Reset all data?')) {
             $('#productsTableBody').empty();
@@ -1004,8 +1001,16 @@ $(document).ready(function() {
         }
     });
     
-    // Form submit with validations
     $('#saleForm').on('submit', function(e) {
+        // Auto-mark receipt as paid before submission
+        var docType = $('#id_document_type').val();
+        if (docType === 'receipt') {
+            var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
+            $('#payment_cash').val(currentBill);
+            $('#payment_mobile, #payment_bank, #payment_card').val(0);
+            updatePaymentCalculations();
+        }
+        
         var customName = $('#custom_customer_name').val();
         if (customName) {
             var nameInput = document.createElement('input');
@@ -1043,7 +1048,6 @@ $(document).ready(function() {
             return false;
         }
         
-        // Validate all rows
         var hasStockError = false;
         var hasPriceError = false;
         
@@ -1080,10 +1084,7 @@ $(document).ready(function() {
         console.log('Form submitted successfully');
     });
     
-    // Add initial row
     addProductRow();
-    
-    // Set defaults
     document.getElementById('id_document_type').value = 'receipt';
     document.getElementById('id_currency').value = 'UGX';
 });
@@ -1109,5 +1110,9 @@ $(document).ready(function() {
 }
 .payment-label:hover { opacity: 0.8; transform: scale(1.02); transition: all 0.2s; cursor: pointer; }
 .customer-container .select2-container { width: 100% !important; }
+.receipt-option {
+    background-color: #d1fae5;
+    font-weight: bold;
+}
 </style>
 {% endblock %}
