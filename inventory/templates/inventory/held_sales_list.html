@@ -9,13 +9,19 @@
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb mb-0">
                     <li class="breadcrumb-item"><a href="{% url 'inventory:dashboard' %}" class="text-white">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'inventory:sale_list' %}" class="text-white">Sales</a></li>
                     <li class="breadcrumb-item active">Held Sales</li>
                 </ol>
             </nav>
         </div>
-        <a href="{% url 'inventory:sale_add' %}" class="btn btn-primary">
-            <i class="fas fa-plus"></i> New Sale
-        </a>
+        <div>
+            <a href="{% url 'inventory:sale_add' %}" class="btn btn-primary">
+                <i class="fas fa-plus"></i> New Sale
+            </a>
+            <a href="{% url 'inventory:sale_list' %}" class="btn btn-secondary">
+                <i class="fas fa-list"></i> All Sales
+            </a>
+        </div>
     </div>
 
     <!-- Statistics Cards -->
@@ -24,7 +30,7 @@
             <div class="card bg-warning text-dark">
                 <div class="card-body">
                     <h5 class="card-title">Active Holds</h5>
-                    <h2 class="mb-0">{{ active_count }}</h2>
+                    <h2 class="mb-0">{{ active_count|default:"0" }}</h2>
                     <small>Ready to resume</small>
                 </div>
             </div>
@@ -33,7 +39,7 @@
             <div class="card bg-danger text-white">
                 <div class="card-body">
                     <h5 class="card-title">Expired Holds</h5>
-                    <h2 class="mb-0">{{ expired_count }}</h2>
+                    <h2 class="mb-0">{{ expired_count|default:"0" }}</h2>
                     <small>Review before resuming</small>
                 </div>
             </div>
@@ -42,7 +48,7 @@
             <div class="card bg-info text-white">
                 <div class="card-body">
                     <h5 class="card-title">Total Holds</h5>
-                    <h2 class="mb-0">{{ total_holds }}</h2>
+                    <h2 class="mb-0">{{ total_holds|default:"0" }}</h2>
                     <small>Sales waiting to be completed</small>
                 </div>
             </div>
@@ -74,10 +80,18 @@
                         {% for sale in active_holds %}
                         <tr>
                             <td><strong>{{ sale.document_number }}</strong></span>
-                            <td>{{ sale.customer_name|default:sale.customer.name|default:"Walk-in" }}</span>
+                            <td>
+                                {% if sale.customer %}
+                                    {{ sale.customer.name|default:"Walk-in" }}
+                                {% elif sale.customer_name %}
+                                    {{ sale.customer_name }}
+                                {% else %}
+                                    <span class="text-muted">Walk-in</span>
+                                {% endif %}
+                            </span>
                             <td>{{ sale.items.count }} items</span>
                             <td>UGX {{ sale.total_amount|floatformat:0 }}</span>
-                            <td>{{ sale.location.name }}</span>
+                            <td>{{ sale.location.name|default:"-" }}</span>
                             <td>{{ sale.created_at|date:"M d, Y H:i" }}</span>
                             <td>{{ sale.held_until|date:"M d, Y H:i" }}</span>
                             <td>
@@ -126,22 +140,33 @@
                             <th>Held Since</th>
                             <th>Expired On</th>
                             <th>Actions</th>
-                        <tr>
+                        </tr>
                     </thead>
                     <tbody>
                         {% for sale in expired_sales %}
                         <tr class="table-danger">
                             <td><strong>{{ sale.document_number }}</strong></span>
-                            <td>{{ sale.customer_name|default:sale.customer.name|default:"Walk-in" }}</span>
+                            <td>
+                                {% if sale.customer %}
+                                    {{ sale.customer.name|default:"Walk-in" }}
+                                {% elif sale.customer_name %}
+                                    {{ sale.customer_name }}
+                                {% else %}
+                                    <span class="text-muted">Walk-in</span>
+                                {% endif %}
+                            </span>
                             <td>{{ sale.items.count }} items</span>
                             <td>UGX {{ sale.total_amount|floatformat:0 }}</span>
-                            <td>{{ sale.location.name }}</span>
+                            <td>{{ sale.location.name|default:"-" }}</span>
                             <td>{{ sale.created_at|date:"M d, Y H:i" }}</span>
                             <td>{{ sale.held_until|date:"M d, Y H:i" }}</span>
                             <td>
                                 <div class="btn-group btn-group-sm">
                                     <a href="{% url 'inventory:sale_add' %}?resume={{ sale.id }}" class="btn btn-warning" title="Resume (Check Stock)">
                                         <i class="fas fa-exclamation-triangle"></i> Resume
+                                    </a>
+                                    <a href="{% url 'inventory:sale_hold_extend' sale.id %}" class="btn btn-info" title="Extend Hold">
+                                        <i class="fas fa-clock"></i> Extend
                                     </a>
                                     <a href="{% url 'inventory:sale_list' %}" class="btn btn-secondary" title="View">
                                         <i class="fas fa-eye"></i> View
