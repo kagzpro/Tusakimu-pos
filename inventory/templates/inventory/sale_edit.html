@@ -5,621 +5,639 @@
 
 {% block content %}
 <div class="container-fluid">
-    <div class="d-sm-flex align-items-center justify-content-between mb-4">
-        <h1 class="h3 mb-0 text-gray-800">Edit Sale: {{ sale.document_number }}</h1>
-        <div>
-            <a href="{% url 'inventory:sale_list' %}" class="btn btn-secondary">
-                <i class="fas fa-arrow-left fa-sm"></i> Back to Sales
-            </a>
-        </div>
-    </div>
-
     <div class="row">
-        <div class="col-lg-12">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Sale Information</h6>
+        <!-- Main Form Column -->
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-edit me-2"></i>Edit Sale: {{ sale.document_number }}
+                        </h5>
+                        <a href="{% url 'inventory:sale_list' %}" class="btn btn-sm btn-outline-light">
+                            <i class="fas fa-times"></i>
+                        </a>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <form method="post" id="saleForm">
+                <div class="card-body p-3">
+                    <form method="POST" id="saleForm">
                         {% csrf_token %}
                         
-                        <div class="row">
+                        <!-- Quick Info Row -->
+                        <div class="row g-2 mb-3">
                             <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Customer Name</label>
-                                    <input type="text" name="customer_name" class="form-control" 
-                                           value="{{ sale.customer_name|default:'' }}" placeholder="Walk-in Customer">
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Customer Phone</label>
-                                    <input type="text" name="customer_phone" class="form-control" 
-                                           value="{{ sale.customer_phone|default:'' }}">
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Customer Email</label>
-                                    <input type="email" name="customer_email" class="form-control" 
-                                           value="{{ sale.customer_email|default:'' }}">
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Location *</label>
-                                    <select name="location_id" class="form-control" required>
-                                        {% for location in locations %}
+                                <select name="location_id" class="form-select form-select-sm" id="id_location" required>
+                                    {% for location in locations %}
                                         <option value="{{ location.id }}" {% if sale.location.id == location.id %}selected{% endif %}>
                                             {{ location.name }}
                                         </option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
+                                    {% endfor %}
+                                </select>
                             </div>
                             <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Document Type</label>
-                                    <select name="document_type" class="form-control">
-                                        <option value="invoice" {% if sale.document_type == 'invoice' %}selected{% endif %}>Invoice</option>
-                                        <option value="receipt" {% if sale.document_type == 'receipt' %}selected{% endif %}>Receipt</option>
-                                        <option value="quotation" {% if sale.document_type == 'quotation' %}selected{% endif %}>Quotation</option>
-                                    </select>
-                                </div>
+                                <select name="customer_id" class="form-select form-select-sm" id="id_customer">
+                                    <option value="">👤 Walk-in Customer</option>
+                                    {% for customer in customers %}
+                                        <option value="{{ customer.id }}" {% if sale.customer and sale.customer.id == customer.id %}selected{% endif %}>
+                                            {{ customer.name }} {% if customer.phone %}({{ customer.phone }}){% endif %}
+                                        </option>
+                                    {% endfor %}
+                                </select>
                             </div>
                             <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Sale Date</label>
-                                    <input type="datetime-local" name="sale_date" class="form-control" 
-                                           value="{{ sale.date|date:'Y-m-d\\TH:i' }}">
-                                </div>
+                                <select name="document_type" class="form-select form-select-sm" id="id_document_type">
+                                    <option value="receipt" {% if sale.document_type == 'receipt' %}selected{% endif %}>🧾 Receipt</option>
+                                    <option value="invoice" {% if sale.document_type == 'invoice' %}selected{% endif %}>📄 Invoice</option>
+                                    <option value="quotation" {% if sale.document_type == 'quotation' %}selected{% endif %}>📝 Quotation</option>
+                                </select>
                             </div>
                         </div>
-                        
-                        <div class="row">
+
+                        <!-- Currency and Date Row -->
+                        <div class="row g-2 mb-3">
                             <div class="col-md-6">
-                                <div class="form-group">
-                                    <label>Discount Amount (UGX)</label>
-                                    <input type="number" step="1000" name="discount_amount" class="form-control" 
-                                           value="{{ sale.discount_amount|default:0 }}" id="discountAmount">
-                                </div>
+                                <select name="currency" class="form-select form-select-sm" id="id_currency" required>
+                                    <option value="UGX" {% if sale.currency == 'UGX' %}selected{% endif %}>🇺🇬 UGX - Ugandan Shilling</option>
+                                    <option value="USD" {% if sale.currency == 'USD' %}selected{% endif %}>🇺🇸 USD - US Dollar</option>
+                                    <option value="EUR" {% if sale.currency == 'EUR' %}selected{% endif %}>🇪🇺 EUR - Euro</option>
+                                    <option value="GBP" {% if sale.currency == 'GBP' %}selected{% endif %}>🇬🇧 GBP - British Pound</option>
+                                    <option value="KES" {% if sale.currency == 'KES' %}selected{% endif %}>🇰🇪 KES - Kenyan Shilling</option>
+                                    <option value="TZS" {% if sale.currency == 'TZS' %}selected{% endif %}>🇹🇿 TZS - Tanzanian Shilling</option>
+                                </select>
                             </div>
                             <div class="col-md-6">
-                                <div class="form-group">
-                                    <label>Tax Amount (UGX)</label>
-                                    <input type="number" step="100" name="tax_amount" class="form-control" 
-                                           value="{{ sale.tax_amount|default:0 }}" id="taxAmount">
-                                </div>
+                                <input type="datetime-local" name="date" class="form-control form-control-sm" value="{{ sale.date|date:'Y-m-d\\TH:i' }}" required>
                             </div>
                         </div>
-                        
-                        <div class="form-group">
-                            <label>Notes</label>
-                            <textarea name="notes" class="form-control" rows="2">{{ sale.notes|default:'' }}</textarea>
-                        </div>
-                        
-                        <hr>
-                        
-                        <h5>Sale Items</h5>
-                        <div class="table-responsive">
-                            <table class="table table-bordered" id="itemsTable">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th style="width: 35%">Product</th>
-                                        <th style="width: 20%">Unit</th>
-                                        <th style="width: 15%">Quantity</th>
-                                        <th style="width: 20%">Unit Price (UGX)</th>
-                                        <th style="width: 15%">Total (UGX)</th>
-                                        <th style="width: 10%">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="itemsTableBody">
-                                    <!-- Items will be populated by JavaScript -->
-                                </tbody>
-                                <tfoot class="table-light">
-                                    <tr class="table-active">
-                                        <td colspan="4" class="text-end fw-bold">Subtotal:</td>
-                                        <td class="fw-bold" id="subtotal">UGX 0</td>
-                                        <td></td>
-                                    </tr>
-                                    <tr>
-                                        <td colspan="4" class="text-end">Discount:</td>
-                                        <td id="discountDisplay">UGX 0</td>
-                                        <td></td>
-                                    </tr>
-                                    <tr>
-                                        <td colspan="4" class="text-end">Tax:</td>
-                                        <td id="taxDisplay">UGX 0</td>
-                                        <td></td>
-                                    </tr>
-                                    <tr class="table-success">
-                                        <td colspan="4" class="text-end fw-bold">Grand Total:</td>
-                                        <td class="fw-bold text-success" id="grandTotal">UGX 0</td>
-                                        <td></td>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                        </div>
-                        
-                        <div class="form-group">
-                            <button type="button" class="btn btn-success" id="addItemBtn">
-                                <i class="fas fa-plus"></i> Add Item
-                            </button>
-                        </div>
-                        
-                        <!-- Product search for adding items -->
-                        <div class="row mt-3">
-                            <div class="col-md-6">
-                                <div class="input-group">
-                                    <input type="text" class="form-control" id="productSearch" 
-                                           placeholder="Search product by name or SKU...">
-                                    <button class="btn btn-outline-primary" type="button" id="searchProductBtn">
-                                        <i class="fas fa-search"></i>
-                                    </button>
-                                </div>
-                                <div id="productSearchResults" class="list-group mt-2" style="display: none;"></div>
+
+                        <!-- Products Section -->
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-boxes me-1"></i>Products
+                                </h6>
+                                <button type="button" class="btn btn-primary btn-sm" id="addProductBtn">
+                                    <i class="fas fa-plus"></i> Add Product
+                                </button>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered" id="productsTable">
+                                    <thead class="table-light">
+                                        <tr class="small">
+                                            <th width="28%">Product</th>
+                                            <th width="15%">Unit</th>
+                                            <th width="8%">Stock</th>
+                                            <th width="10%">Qty</th>
+                                            <th width="20%">Price</th>
+                                            <th width="12%">Total</th>
+                                            <th width="5%"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="productsTableBody">
+                                        <!-- Items will be populated by JavaScript -->
+                                    </tbody>
+                                    <tfoot>
+                                        <tr class="table-active">
+                                            <td colspan="5" class="text-end fw-bold">Total:</td>
+                                            <td colspan="2" class="fw-bold text-success"><span id="currencySymbol">UGX</span> <span id="grandTotal">0</span></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
                             </div>
                         </div>
-                        
-                        <!-- Hidden field to store items data -->
-                        <input type="hidden" name="items_data" id="itemsData" value="">
-                        
-                        <div class="form-group mt-4">
-                            <button type="submit" name="save_draft" class="btn btn-warning">
-                                <i class="fas fa-save"></i> Save as Draft
+
+                        <!-- Hidden Fields -->
+                        <input type="hidden" name="items_data" id="itemsData" value="[]">
+                        <input type="hidden" name="payment_data" id="paymentData" value="[]">
+                        <input type="hidden" name="paid_amount" id="id_paid_amount" value="0">
+
+                        <!-- Notes -->
+                        <div class="mb-2">
+                            <textarea name="notes" class="form-control form-control-sm" rows="2" placeholder="Notes...">{{ sale.notes|default:'' }}</textarea>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="d-flex gap-2">
+                            <button type="submit" name="save_sent" class="btn btn-success btn-sm flex-grow-1" id="updateSaleBtn">
+                                <i class="fas fa-check"></i> Update Sale
                             </button>
-                            <button type="submit" name="save_sent" class="btn btn-primary">
-                                <i class="fas fa-paper-plane"></i> Update & Send
+                            <button type="submit" name="save_print" class="btn btn-info btn-sm" id="savePrintBtn">
+                                <i class="fas fa-print"></i> Save & Print
                             </button>
-                            <a href="{% url 'inventory:sale_list' %}" class="btn btn-secondary">Cancel</a>
+                            <button type="button" class="btn btn-secondary btn-sm" id="resetButton">
+                                <i class="fas fa-undo"></i> Reset
+                            </button>
+                            <a href="{% url 'inventory:sale_list' %}" class="btn btn-danger btn-sm">Cancel</a>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payment Summary Sidebar -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header bg-info text-white py-2">
+                    <h6 class="mb-0"><i class="fas fa-money-bill-wave me-2"></i>Payment Summary</h6>
+                </div>
+                <div class="card-body p-3">
+                    <div class="small">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Sale Total:</span>
+                            <strong id="saleTotalDisplay">UGX 0</strong>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Paid Amount:</span>
+                            <strong class="text-success" id="paidDisplay">UGX {{ sale.paid_amount|floatformat:0 }}</strong>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span>Balance Due:</span>
+                            <strong class="text-danger" id="balanceDisplay">UGX 0</strong>
+                        </div>
+                        <hr>
+                        <div class="text-center">
+                            <span class="badge bg-{% if sale.document_status == 'paid' %}success{% elif sale.document_status == 'sent' %}primary{% elif sale.document_status == 'draft' %}secondary{% else %}warning{% endif %}">
+                                {{ sale.get_document_status_display }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mt-2">
+                <div class="card-body p-2 text-center">
+                    <small class="text-muted" id="itemsCount">0 items</small>
+                    <span class="mx-2">|</span>
+                    <small class="text-muted">{{ sale.document_number }}</small>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<style>
-.table-responsive {
-    max-height: 500px;
-    overflow-y: auto;
-}
-.item-row {
-    transition: background-color 0.2s;
-}
-.item-row:hover {
-    background-color: #f8f9fa;
-}
-.unit-select {
-    min-width: 120px;
-}
-.quantity-input, .price-input {
-    text-align: right;
-}
-#productSearchResults {
-    position: absolute;
-    z-index: 1000;
-    width: 100%;
-    max-height: 300px;
-    overflow-y: auto;
-}
-.search-result-item {
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-.search-result-item:hover {
-    background-color: #e9ecef;
-}
-</style>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Products data for unit selection
-    let productsData = {};
+// ==================== PRODUCTS DATA ====================
+var productsData = {};
+{% for product in products %}
+productsData[{{ product.id|safe }}] = {
+    id: {{ product.id|safe }},
+    name: "{{ product.name|escapejs }}",
+    sku: "{{ product.sku|default:''|escapejs }}",
+    base_unit: "{{ product.base_unit|default:'piece'|escapejs }}",
+    cost_price: {{ product.cost_price|default:0|safe }},
+    units: [
+        {% for unit in product.units.all %}
+        {
+            id: {{ unit.id|safe }},
+            name: "{{ unit.unit_name|escapejs }}",
+            quantity_in_base: {{ unit.quantity_in_base|safe }},
+            selling_price: {{ unit.selling_price|safe }}
+        },
+        {% endfor %}
+    ],
+    default_selling_price: {{ product.selling_price|default:0|safe }}
+};
+{% endfor %}
+
+// ==================== EXISTING ITEMS ====================
+var existingItems = {{ existing_items_json|safe }};
+
+// ==================== GLOBAL VARIABLES ====================
+var rowCounter = 0;
+var currentLocationId = {{ sale.location.id|default:'null' }};
+var currencySymbol = '{{ sale.currency|default:"UGX" }}';
+
+// ==================== HELPER FUNCTIONS ====================
+function formatMoney(amount) {
+    if (amount === undefined || amount === null) return '0';
+    return new Intl.NumberFormat('en-UG').format(amount);
+}
+
+function parseMoney(value) {
+    if (typeof value === 'number') return value;
+    return parseFloat(String(value).replace(/[^\d.-]/g, '')) || 0;
+}
+
+// ==================== STOCK FUNCTIONS ====================
+async function getProductStock(productId) {
+    if (!currentLocationId) return 0;
+    try {
+        var response = await fetch('/inventory/api/stock/' + productId + '/' + currentLocationId + '/');
+        if (!response.ok) return 0;
+        var data = await response.json();
+        return data.quantity || 0;
+    } catch(e) { 
+        return 0; 
+    }
+}
+
+function getUnitOptions(productId, selectedUnitId) {
+    var product = productsData[productId];
+    if (!product) return '<option value="">Select product first</option>';
     
-    // Current items array
-    let items = [];
-    
-    // Load existing items from server
-    const existingItemsJson = '{{ existing_items_json|safe }}';
-    if (existingItemsJson && existingItemsJson !== '[]') {
-        try {
-            items = JSON.parse(existingItemsJson);
-            renderItemsTable();
-        } catch(e) {
-            console.error('Error parsing existing items:', e);
+    if (product.units && product.units.length > 0) {
+        var html = '<option value="">Select unit...</option>';
+        for (var i = 0; i < product.units.length; i++) {
+            var unit = product.units[i];
+            var selected = (selectedUnitId && unit.id == selectedUnitId) ? 'selected' : '';
+            html += '<option value="' + unit.id + '" data-base-qty="' + unit.quantity_in_base + '" data-price="' + unit.selling_price + '" data-cost="' + product.cost_price + '" ' + selected + '>' +
+                unit.name + ' (1 = ' + unit.quantity_in_base + ' ' + product.base_unit + 's) - ' + currencySymbol + ' ' + formatMoney(unit.selling_price) +
+            '</option>';
         }
+        return html;
+    }
+    var selected = (selectedUnitId === 'default') ? 'selected' : '';
+    return '<option value="default" data-base-qty="1" data-price="' + product.default_selling_price + '" data-cost="' + product.cost_price + '" ' + selected + '>' +
+        product.base_unit + ' - ' + currencySymbol + ' ' + formatMoney(product.default_selling_price) +
+    '</option>';
+}
+
+// ==================== PRODUCT ROW FUNCTIONS ====================
+function createProductRow(item) {
+    rowCounter++;
+    var row = document.createElement('tr');
+    row.className = 'product-row';
+    row.setAttribute('data-row-id', rowCounter);
+    
+    var productOptions = '<option value="">Select Product</option>';
+    {% for product in products %}
+    productOptions += '<option value="{{ product.id }}">{{ product.name|truncatechars:35 }}</option>';
+    {% endfor %}
+    
+    var productId = item ? item.product_id : '';
+    var unitId = item ? item.unit_id : '';
+    var quantity = item ? item.quantity : 1;
+    var price = item ? item.unit_price : '';
+    var total = item ? item.total : 0;
+    
+    row.innerHTML = `
+        <td class="product-cell">
+            <select class="form-select form-select-sm product-select" style="width:100%">
+                <option value="">Select Product</option>
+                {% for product in products %}
+                <option value="{{ product.id }}" ${productId == {{ product.id }} ? 'selected' : ''}>
+                    {{ product.name|truncatechars:35 }}
+                </option>
+                {% endfor %}
+            </select>
+        </td>
+        <td class="unit-cell">
+            <select class="form-select form-select-sm unit-select" disabled style="width:100%">
+                <option value="">Select product</option>
+            </select>
+        </td>
+        <td class="stock-cell stock-info text-center fw-bold">-</td>
+        <td>
+            <input type="number" class="form-control form-control-sm quantity" min="0.01" step="0.01" value="${quantity}">
+        </td>
+        <td>
+            <input type="number" class="form-control form-control-sm unit-price" step="100" min="0" value="${price}" placeholder="Enter price">
+        </td>
+        <td>
+            <input type="text" class="form-control form-control-sm total" readonly value="${total ? formatMoney(total) : '0'}">
+        </td>
+        <td class="text-center">
+            <button type="button" class="btn btn-danger btn-sm remove-row">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>
+    `;
+    
+    return row;
+}
+
+async function updateStockInfo(row) {
+    var productSelect = row.querySelector('.product-select');
+    var unitSelect = row.querySelector('.unit-select');
+    var stockSpan = row.querySelector('.stock-info');
+    var productId = productSelect ? productSelect.value : null;
+    var unitValue = unitSelect ? unitSelect.value : null;
+    
+    if (!currentLocationId || !productId || !unitValue) {
+        stockSpan.textContent = '-';
+        return;
     }
     
-    // Function to fetch product units
-    async function fetchProductUnits(productId) {
-        if (productsData[productId]) {
-            return productsData[productId];
-        }
-        
-        try {
-            const response = await fetch(`/inventory/api/product-units/${productId}/`);
-            const data = await response.json();
-            productsData[productId] = data;
-            return data;
-        } catch (error) {
-            console.error('Error fetching product units:', error);
-            return null;
-        }
+    var stock = await getProductStock(productId);
+    var selectedOption = unitSelect.options[unitSelect.selectedIndex];
+    if (!selectedOption) return;
+    
+    var baseQty = parseFloat(selectedOption.dataset.baseQty || 1);
+    var availableUnits = stock / baseQty;
+    
+    stockSpan.innerHTML = availableUnits.toFixed(2);
+    
+    if (availableUnits < 0.01) {
+        stockSpan.style.color = '#ef4444';
+    } else if (availableUnits < 10) {
+        stockSpan.style.color = '#f59e0b';
+    } else {
+        stockSpan.style.color = '#10b981';
     }
     
-    // Function to add item to table
-    window.addItemToSale = async function(productId, productName, productSku, unitId, unitName, unitPrice, quantity = 1) {
-        // Fetch units if needed
-        let productData = productsData[productId];
-        if (!productData) {
-            productData = await fetchProductUnits(productId);
-        }
+    validateStock(row);
+}
+
+function validateStock(row) {
+    var quantityInput = row.querySelector('.quantity');
+    var stockSpan = row.querySelector('.stock-info');
+    var quantity = parseFloat(quantityInput.value) || 0;
+    var availableStock = parseFloat(stockSpan.textContent) || 0;
+    
+    row.querySelector('.stock-error')?.remove();
+    
+    if (quantity > availableStock && availableStock > 0) {
+        quantityInput.classList.add('is-invalid');
+        var errorSpan = document.createElement('small');
+        errorSpan.className = 'stock-error text-danger';
+        errorSpan.innerHTML = `<i class="fas fa-exclamation-circle"></i> Only ${availableStock.toFixed(2)} units available`;
+        quantityInput.parentNode.appendChild(errorSpan);
+        return false;
+    } else {
+        quantityInput.classList.remove('is-invalid');
+        return true;
+    }
+}
+
+function recalcRow(row) {
+    var quantity = parseFloat(row.querySelector('.quantity').value) || 0;
+    var price = parseFloat(row.querySelector('.unit-price').value) || 0;
+    var total = quantity * price;
+    row.querySelector('.total').value = formatMoney(total);
+    
+    validateStock(row);
+    
+    updateGrandTotal();
+    saveItemsData();
+}
+
+function updateGrandTotal() {
+    var total = 0;
+    document.querySelectorAll('.product-row').forEach(function(row) {
+        total += parseMoney(row.querySelector('.total').value);
+    });
+    document.getElementById('grandTotal').innerText = formatMoney(total);
+    document.getElementById('saleTotalDisplay').innerHTML = currencySymbol + ' ' + formatMoney(total);
+    document.getElementById('itemsCount').innerHTML = document.querySelectorAll('.product-row').length + ' items';
+    updatePaymentSummary();
+}
+
+function updatePaymentSummary() {
+    var total = parseMoney(document.getElementById('grandTotal').innerText);
+    var paid = parseMoney('{{ sale.paid_amount|default:0 }}');
+    var balance = total - paid;
+    
+    document.getElementById('saleTotalDisplay').innerHTML = currencySymbol + ' ' + formatMoney(total);
+    document.getElementById('paidDisplay').innerHTML = currencySymbol + ' ' + formatMoney(paid);
+    document.getElementById('balanceDisplay').innerHTML = currencySymbol + ' ' + formatMoney(Math.max(0, balance));
+}
+
+function saveItemsData() {
+    var items = [];
+    document.querySelectorAll('.product-row').forEach(function(row) {
+        var productSelect = row.querySelector('.product-select');
+        var unitSelect = row.querySelector('.unit-select');
+        var productId = productSelect ? productSelect.value : null;
+        var unitId = unitSelect ? unitSelect.value : null;
         
-        if (!productData) {
-            showNotification('Could not load product information', 'danger');
-            return;
-        }
-        
-        // Get unit details
-        let selectedUnit = null;
-        if (unitId) {
-            selectedUnit = productData.units.find(u => u.id == unitId);
-        } else {
-            selectedUnit = productData.units.find(u => u.is_default) || productData.units[0];
-        }
-        
-        if (!selectedUnit) {
-            showNotification('No unit available for this product', 'danger');
-            return;
-        }
-        
-        const itemTotal = quantity * (selectedUnit.selling_price || unitPrice);
-        
-        // Check if product already exists in items
-        const existingIndex = items.findIndex(item => item.product_id == productId && item.unit_id == selectedUnit.id);
-        
-        if (existingIndex >= 0) {
-            // Update existing item
-            items[existingIndex].quantity += quantity;
-            items[existingIndex].total = items[existingIndex].quantity * items[existingIndex].unit_price;
-        } else {
-            // Add new item
+        if (productId && unitId && unitId !== '') {
+            var quantity = parseFloat(row.querySelector('.quantity').value) || 0;
+            var price = parseFloat(row.querySelector('.unit-price').value) || 0;
+            var selectedOption = unitSelect.options[unitSelect.selectedIndex];
+            var baseQty = selectedOption ? parseFloat(selectedOption.dataset.baseQty || 1) : 1;
+            
             items.push({
-                id: null,
-                product_id: productId,
-                product_name: productName,
-                product_sku: productSku,
-                unit_id: selectedUnit.id,
-                unit_name: selectedUnit.name,
-                unit_price: selectedUnit.selling_price,
+                product_id: parseInt(productId),
+                unit_id: unitId === 'default' ? null : parseInt(unitId),
                 quantity: quantity,
-                total: itemTotal,
-                base_quantity: quantity * selectedUnit.quantity_in_base
+                unit_price: price,
+                total: quantity * price,
+                base_quantity: quantity * baseQty
             });
         }
-        
-        renderItemsTable();
-        updateTotals();
-        showNotification(`${productName} added successfully`, 'success');
-    };
+    });
+    document.getElementById('itemsData').value = JSON.stringify(items);
+}
+
+function setupRowEvents(row) {
+    var productSelect = row.querySelector('.product-select');
+    var unitSelect = row.querySelector('.unit-select');
+    var quantityInput = row.querySelector('.quantity');
+    var priceInput = row.querySelector('.unit-price');
+    var removeBtn = row.querySelector('.remove-row');
     
-    // Render items table
-    function renderItemsTable() {
-        const tbody = document.getElementById('itemsTableBody');
-        if (!tbody) return;
+    $(productSelect).select2({
+        width: '100%',
+        dropdownParent: $(row),
+        placeholder: 'Search product...'
+    });
+    
+    $(productSelect).on('change', async function() {
+        var productId = this.value;
         
-        if (items.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No items added. Search and add products above.</td></tr>';
-            return;
-        }
-        
-        tbody.innerHTML = '';
-        items.forEach((item, index) => {
-            const row = tbody.insertRow();
-            row.className = 'item-row';
+        if (productId && productsData[productId]) {
+            unitSelect.disabled = false;
+            unitSelect.innerHTML = getUnitOptions(productId);
             
-            // Product name cell
-            const productCell = row.insertCell(0);
-            productCell.innerHTML = `
-                <strong>${escapeHtml(item.product_name)}</strong>
-                <br>
-                <small class="text-muted">SKU: ${escapeHtml(item.product_sku)}</small>
-                <input type="hidden" name="product_id[]" value="${item.product_id}">
-            `;
+            $(unitSelect).select2({
+                width: '100%',
+                dropdownParent: $(row),
+                placeholder: 'Select unit...'
+            });
             
-            // Unit selector cell
-            const unitCell = row.insertCell(1);
-            unitCell.innerHTML = `
-                <select class="form-select form-select-sm unit-select" data-index="${index}">
-                    <option value="">Loading units...</option>
-                </select>
-            `;
-            
-            // Quantity cell
-            const qtyCell = row.insertCell(2);
-            qtyCell.innerHTML = `
-                <input type="number" class="form-control form-control-sm quantity-input" 
-                       value="${item.quantity}" step="1" min="1" data-index="${index}">
-            `;
-            
-            // Price cell
-            const priceCell = row.insertCell(3);
-            priceCell.innerHTML = `
-                <input type="number" class="form-control form-control-sm price-input" 
-                       value="${item.unit_price}" step="100" data-index="${index}">
-            `;
-            
-            // Total cell
-            const totalCell = row.insertCell(4);
-            totalCell.className = 'text-end fw-bold';
-            totalCell.innerHTML = `UGX ${formatNumber(item.total)}`;
-            
-            // Action cell
-            const actionCell = row.insertCell(5);
-            actionCell.className = 'text-center';
-            actionCell.innerHTML = `
-                <button type="button" class="btn btn-danger btn-sm remove-item" data-index="${index}">
-                    <i class="fas fa-trash"></i>
-                </button>
-            `;
-            
-            // Populate unit selector
-            populateUnitSelector(row.querySelector('.unit-select'), item.product_id, item.unit_id);
-        });
-        
-        // Add event listeners
-        attachItemEvents();
-    }
-    
-    // Populate unit selector
-    async function populateUnitSelector(selectElement, productId, selectedUnitId) {
-        const productData = await fetchProductUnits(productId);
-        if (!productData || !productData.units) {
-            selectElement.innerHTML = '<option value="">No units available</option>';
-            return;
-        }
-        
-        let options = '';
-        for (const unit of productData.units) {
-            const selected = (selectedUnitId && unit.id == selectedUnitId) ? 'selected' : '';
-            options += `<option value="${unit.id}" data-price="${unit.selling_price}" data-conversion="${unit.quantity_in_base}">
-                ${unit.name} (1 = ${unit.quantity_in_base} ${productData.base_unit}s) - UGX ${formatNumber(unit.selling_price)}
-            </option>`;
-        }
-        selectElement.innerHTML = options;
-    }
-    
-    // Attach event listeners to item rows
-    function attachItemEvents() {
-        // Unit change events
-        document.querySelectorAll('.unit-select').forEach(select => {
-            select.removeEventListener('change', handleUnitChange);
-            select.addEventListener('change', handleUnitChange);
-        });
-        
-        // Quantity change events
-        document.querySelectorAll('.quantity-input').forEach(input => {
-            input.removeEventListener('input', handleQuantityChange);
-            input.addEventListener('input', handleQuantityChange);
-        });
-        
-        // Price change events
-        document.querySelectorAll('.price-input').forEach(input => {
-            input.removeEventListener('input', handlePriceChange);
-            input.addEventListener('input', handlePriceChange);
-        });
-        
-        // Remove button events
-        document.querySelectorAll('.remove-item').forEach(btn => {
-            btn.removeEventListener('click', handleRemoveItem);
-            btn.addEventListener('click', handleRemoveItem);
-        });
-    }
-    
-    function handleUnitChange(e) {
-        const index = parseInt(e.target.dataset.index);
-        const selectedOption = e.target.options[e.target.selectedIndex];
-        const unitPrice = parseFloat(selectedOption.dataset.price);
-        
-        if (items[index]) {
-            items[index].unit_id = parseInt(e.target.value);
-            items[index].unit_price = unitPrice;
-            items[index].total = items[index].quantity * unitPrice;
-            renderItemsTable();
-            updateTotals();
-        }
-    }
-    
-    function handleQuantityChange(e) {
-        const index = parseInt(e.target.dataset.index);
-        const newQuantity = parseFloat(e.target.value) || 0;
-        
-        if (items[index] && newQuantity > 0) {
-            items[index].quantity = newQuantity;
-            items[index].total = newQuantity * items[index].unit_price;
-            renderItemsTable();
-            updateTotals();
-        }
-    }
-    
-    function handlePriceChange(e) {
-        const index = parseInt(e.target.dataset.index);
-        const newPrice = parseFloat(e.target.value) || 0;
-        
-        if (items[index] && newPrice > 0) {
-            items[index].unit_price = newPrice;
-            items[index].total = items[index].quantity * newPrice;
-            renderItemsTable();
-            updateTotals();
-        }
-    }
-    
-    function handleRemoveItem(e) {
-        const index = parseInt(e.target.closest('.remove-item').dataset.index);
-        items.splice(index, 1);
-        renderItemsTable();
-        updateTotals();
-    }
-    
-    function updateTotals() {
-        const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-        const discount = parseFloat(document.getElementById('discountAmount')?.value) || 0;
-        const tax = parseFloat(document.getElementById('taxAmount')?.value) || 0;
-        const grandTotal = subtotal + tax - discount;
-        
-        document.getElementById('subtotal').innerHTML = `UGX ${formatNumber(subtotal)}`;
-        document.getElementById('discountDisplay').innerHTML = `UGX ${formatNumber(discount)}`;
-        document.getElementById('taxDisplay').innerHTML = `UGX ${formatNumber(tax)}`;
-        document.getElementById('grandTotal').innerHTML = `UGX ${formatNumber(grandTotal)}`;
-        
-        // Update hidden items data
-        document.getElementById('itemsData').value = JSON.stringify(items);
-    }
-    
-    // Product search functionality
-    const productSearch = document.getElementById('productSearch');
-    const searchProductBtn = document.getElementById('searchProductBtn');
-    const searchResults = document.getElementById('productSearchResults');
-    
-    async function searchProducts() {
-        const query = productSearch.value.trim();
-        if (query.length < 2) {
-            searchResults.style.display = 'none';
-            return;
-        }
-        
-        try {
-            const response = await fetch(`/inventory/api/products/?search=${encodeURIComponent(query)}`);
-            const data = await response.json();
-            
-            if (data.products && data.products.length > 0) {
-                displaySearchResults(data.products);
-                searchResults.style.display = 'block';
-            } else {
-                searchResults.innerHTML = '<div class="list-group-item text-muted">No products found</div>';
-                searchResults.style.display = 'block';
-            }
-        } catch (error) {
-            console.error('Search error:', error);
-            searchResults.innerHTML = '<div class="list-group-item text-danger">Error searching products</div>';
-            searchResults.style.display = 'block';
-        }
-    }
-    
-    function displaySearchResults(products) {
-        let html = '';
-        products.forEach(product => {
-            html += `
-                <div class="list-group-item list-group-item-action search-result-item" 
-                     data-product-id="${product.id}"
-                     data-product-name="${escapeHtml(product.name)}"
-                     data-product-sku="${escapeHtml(product.sku)}">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <strong>${escapeHtml(product.name)}</strong>
-                            <br>
-                            <small class="text-muted">SKU: ${escapeHtml(product.sku)} | Stock: ${product.stock || 0} ${product.base_unit}</small>
-                        </div>
-                        <div>
-                            <span class="badge bg-primary">UGX ${formatNumber(product.selling_price)}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        searchResults.innerHTML = html;
-        
-        // Add click handlers
-        document.querySelectorAll('.search-result-item').forEach(item => {
-            item.addEventListener('click', async function() {
-                const productId = this.dataset.productId;
-                const productName = this.dataset.productName;
-                const productSku = this.dataset.productSku;
-                
-                const productData = await fetchProductUnits(productId);
-                if (productData && productData.units && productData.units.length > 0) {
-                    const defaultUnit = productData.units.find(u => u.is_default) || productData.units[0];
-                    addItemToSale(productId, productName, productSku, defaultUnit.id, defaultUnit.name, defaultUnit.selling_price, 1);
+            $(unitSelect).off('change').on('change', function() {
+                var opt = this.options[this.selectedIndex];
+                if (opt && opt.dataset && opt.dataset.price) {
+                    var defaultPrice = parseFloat(opt.dataset.price);
+                    var costPrice = parseFloat(opt.dataset.cost) || 0;
+                    
+                    priceInput.value = defaultPrice.toFixed(0);
+                    priceInput.dataset.defaultPrice = defaultPrice;
+                    priceInput.dataset.minPrice = costPrice;
+                    quantityInput.disabled = false;
+                    
+                    updateStockInfo(row);
+                    recalcRow(row);
                 }
-                
-                productSearch.value = '';
-                searchResults.style.display = 'none';
             });
+            
+            await updateStockInfo(row);
+        } else {
+            unitSelect.disabled = true;
+            unitSelect.innerHTML = '<option value="">Select product</option>';
+            quantityInput.disabled = true;
+            priceInput.value = '';
+            recalcRow(row);
+        }
+    });
+    
+    priceInput.addEventListener('input', function() {
+        recalcRow(row);
+    });
+    
+    quantityInput.addEventListener('input', function() {
+        validateStock(row);
+        recalcRow(row);
+    });
+    
+    if (removeBtn) {
+        removeBtn.addEventListener('click', function() {
+            row.remove();
+            updateGrandTotal();
+            saveItemsData();
         });
     }
+}
+
+function addProductRow(item) {
+    if (!currentLocationId) {
+        alert('Please select a location first');
+        document.getElementById('id_location').focus();
+        return;
+    }
     
-    productSearch.addEventListener('keyup', function(e) {
-        if (e.key === 'Enter') {
-            searchProducts();
-        } else {
-            setTimeout(searchProducts, 500);
+    var newRow = createProductRow(item);
+    document.getElementById('productsTableBody').appendChild(newRow);
+    setupRowEvents(newRow);
+    
+    // If item exists, set values after a short delay
+    if (item) {
+        setTimeout(function() {
+            var productSelect = newRow.querySelector('.product-select');
+            var unitSelect = newRow.querySelector('.unit-select');
+            var quantityInput = newRow.querySelector('.quantity');
+            var priceInput = newRow.querySelector('.unit-price');
+            
+            // Trigger product change to load units
+            productSelect.value = item.product_id;
+            $(productSelect).trigger('change');
+            
+            // After units load, set quantity and price
+            setTimeout(function() {
+                if (item.unit_id) {
+                    for (var i = 0; i < unitSelect.options.length; i++) {
+                        if (unitSelect.options[i].value == item.unit_id) {
+                            unitSelect.selectedIndex = i;
+                            $(unitSelect).trigger('change');
+                            break;
+                        }
+                    }
+                }
+                quantityInput.value = item.quantity;
+                priceInput.value = item.unit_price;
+                recalcRow(newRow);
+            }, 300);
+        }, 100);
+    }
+    
+    saveItemsData();
+    updateGrandTotal();
+    
+    setTimeout(function() {
+        $(newRow.querySelector('.product-select')).select2('open');
+    }, 100);
+}
+
+// ==================== DOCUMENT READY ====================
+$(document).ready(function() {
+    console.log('Sale edit form initialized');
+    
+    $('#id_location').select2({ 
+        width: '100%', 
+        placeholder: 'Select location...',
+        allowClear: true
+    }).on('change', function() {
+        currentLocationId = this.value;
+        document.querySelectorAll('.product-row').forEach(function(row) {
+            updateStockInfo(row);
+        });
+    });
+    
+    $('#id_customer').select2({ width: '100%', placeholder: 'Select customer...' });
+    $('#id_document_type').select2({ width: '100%' });
+    $('#id_currency').select2({ width: '100%' }).on('change', function() {
+        currencySymbol = this.value;
+        document.getElementById('currencySymbol').innerText = currencySymbol;
+        updateGrandTotal();
+    });
+    
+    // Load existing items
+    if (existingItems && existingItems.length > 0) {
+        for (var i = 0; i < existingItems.length; i++) {
+            addProductRow(existingItems[i]);
+        }
+    } else {
+        addProductRow();
+    }
+    
+    // Add product button
+    $('#addProductBtn').on('click', function(e) {
+        e.preventDefault();
+        addProductRow();
+    });
+    
+    // Reset button
+    $('#resetButton').on('click', function() {
+        if (confirm('Reset all data?')) {
+            $('#productsTableBody').empty();
+            $('#grandTotal').text('0');
+            $('#itemsData').val('[]');
+            addProductRow();
+            updateGrandTotal();
         }
     });
     
-    searchProductBtn.addEventListener('click', searchProducts);
-    
-    // Hide results when clicking outside
-    document.addEventListener('click', function(e) {
-        if (!productSearch.contains(e.target) && !searchResults.contains(e.target)) {
-            searchResults.style.display = 'none';
-        }
-    });
-    
-    // Discount and tax change handlers
-    const discountInput = document.getElementById('discountAmount');
-    const taxInput = document.getElementById('taxAmount');
-    if (discountInput) discountInput.addEventListener('input', updateTotals);
-    if (taxInput) taxInput.addEventListener('input', updateTotals);
-    
-    // Form submission
-    const saleForm = document.getElementById('saleForm');
-    saleForm.addEventListener('submit', function(e) {
+    // Form submit
+    $('#saleForm').on('submit', function(e) {
+        saveItemsData();
+        
+        var items = JSON.parse($('#itemsData').val() || '[]');
         if (items.length === 0) {
             e.preventDefault();
-            showNotification('Please add at least one item to the sale', 'danger');
+            alert('❌ Please add at least one product');
             return false;
         }
-        document.getElementById('itemsData').value = JSON.stringify(items);
+        
+        var hasStockError = false;
+        document.querySelectorAll('.product-row').forEach(function(row) {
+            if (!validateStock(row)) {
+                hasStockError = true;
+            }
+        });
+        
+        if (hasStockError) {
+            e.preventDefault();
+            alert('❌ Some products have insufficient stock. Please reduce quantities or remove items.');
+            return false;
+        }
+        
+        console.log('Form submitted with', items.length, 'items');
     });
-    
-    // Helper functions
-    function formatNumber(value) {
-        let num = parseFloat(value);
-        if (isNaN(num)) return '0';
-        return num.toLocaleString('en-US');
-    }
-    
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
-    function showNotification(message, type) {
-        const notification = document.createElement('div');
-        notification.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 end-0 m-3`;
-        notification.style.zIndex = '9999';
-        notification.style.minWidth = '300px';
-        notification.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        `;
-        document.body.appendChild(notification);
-        setTimeout(() => notification.remove(), 3000);
-    }
-    
-    // Initialize with existing items
-    if (items.length > 0) {
-        renderItemsTable();
-        updateTotals();
-    }
 });
 </script>
+
+<style>
+.form-select-sm, .form-control-sm { font-size: 0.8rem; }
+.table-sm th, .table-sm td { padding: 0.4rem; vertical-align: middle; }
+.select2-container--default .select2-selection--single { height: 31px; }
+.select2-container--default .select2-selection--single .select2-selection__rendered { line-height: 29px; }
+.btn-sm { padding: 0.25rem 0.5rem; }
+.stock-info { font-weight: bold; }
+.is-invalid {
+    border-color: #ef4444 !important;
+    background-color: rgba(239, 68, 68, 0.1) !important;
+}
+.stock-error {
+    display: block;
+    font-size: 0.7rem;
+    margin-top: 3px;
+    color: #ef4444;
+}
+</style>
 {% endblock %}
