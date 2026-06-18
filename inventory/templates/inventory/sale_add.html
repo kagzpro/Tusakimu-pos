@@ -27,7 +27,7 @@
                                 <select name="location" class="form-select form-select-sm" id="id_location" required>
                                     <option value="">📍 Select Location</option>
                                     {% for location in locations %}
-                                        <option value="{{ location.id }}" {% if locations|length == 1 %}selected{% endif %}>
+                                        <option value="{{ location.id }}" {% if location.id == 1 or locations|length == 1 %}selected{% endif %}>
                                             {{ location.name }}
                                         </option>
                                     {% endfor %}
@@ -318,7 +318,6 @@ function autoPayForReceipt() {
         var cardPaid = parseMoney($('#payment_card').val()) || 0;
         var totalPaid = currentPaid + mobilePaid + bankPaid + cardPaid;
         
-        // If not fully paid, auto-set cash payment
         if (totalPaid < currentBill) {
             $('#payment_cash').val(currentBill);
             $('#payment_mobile, #payment_bank, #payment_card').val(0);
@@ -430,7 +429,7 @@ function createProductRow() {
             <input type="number" class="form-control form-control-sm quantity" min="0.01" step="0.01" value="1" disabled>
         </td>
         <td>
-            <input type="number" class="form-control form-control-sm unit-price" step="100" min="0">
+            <input type="number" class="form-control form-control-sm unit-price" step="100" min="0" placeholder="Enter price">
         </td>
         <td>
             <input type="text" class="form-control form-control-sm total" readonly value="0">
@@ -549,7 +548,6 @@ function updateGrandTotal() {
     document.getElementById('itemsCount').innerHTML = document.querySelectorAll('.product-row').length + ' items';
     updatePaymentCalculations();
     
-    // Auto-pay for receipts when total changes
     autoPayForReceipt();
 }
 
@@ -733,6 +731,7 @@ function setupRowEvents(row) {
                     var defaultPrice = parseFloat(opt.dataset.price);
                     var costPrice = parseFloat(opt.dataset.cost) || 0;
                     
+                    // FIX: Set price but leave editable
                     priceInput.value = defaultPrice.toFixed(0);
                     priceInput.dataset.defaultPrice = defaultPrice;
                     priceInput.dataset.minPrice = costPrice;
@@ -1001,88 +1000,78 @@ $(document).ready(function() {
         }
     });
     
+    // ==================== FIX: PREVENT AUTO-SUBMIT ====================
+    // Prevent Enter key from submitting form
+    $('#saleForm').on('keydown', function(e) {
+        if (e.key === 'Enter') {
+            // Check if the focused element is a text input
+            var tag = e.target.tagName.toLowerCase();
+            if (tag === 'input' || tag === 'select') {
+                e.preventDefault();
+                return false;
+            }
+        }
+    });
+    
+    // ==================== FIX: FORM SUBMIT - ONLY WHEN CLICKED ====================
     $('#saleForm').on('submit', function(e) {
-        // Auto-mark receipt as paid before submission
-        var docType = $('#id_document_type').val();
-        if (docType === 'receipt') {
-            var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
-            $('#payment_cash').val(currentBill);
-            $('#payment_mobile, #payment_bank, #payment_card').val(0);
-            updatePaymentCalculations();
+        // Check if the form was submitted by a button click
+        var submitter = e.originalEvent ? e.originalEvent.submitter : null;
+        if (!submitter) {
+            // If no submitter (Enter key press), prevent submission
+            e.preventDefault();
+            return false;
         }
         
-        var customName = $('#custom_customer_name').val();
-        if (customName) {
-            var nameInput = document.createElement('input');
-            nameInput.type = 'hidden';
-            nameInput.name = 'customer_name';
-            nameInput.value = customName;
-            this.appendChild(nameInput);
-            
-            var phoneInput = document.createElement('input');
-            phoneInput.type = 'hidden';
-            phoneInput.name = 'customer_phone';
-            phoneInput.value = $('#custom_customer_phone').val();
-            this.appendChild(phoneInput);
-        } else if (selectedCustomerId) {
-            var customerIdInput = document.createElement('input');
-            customerIdInput.type = 'hidden';
-            customerIdInput.name = 'customer';
-            customerIdInput.value = selectedCustomerId;
-            this.appendChild(customerIdInput);
+        // Check if it's one of our buttons
+        var validButtons = ['createSaleBtn', 'saveHoldBtn', 'savePrintBtn'];
+        if (submitter && validButtons.includes(submitter.id)) {
+            // Let the form submit normally
+            return true;
+        } else {
+            e.preventDefault();
+            return false;
         }
-        
-        saveItemsData();
-        savePaymentData();
-        
+    });
+    
+    // ==================== FIX: VALIDATE BEFORE SUBMIT ====================
+    // Override the form submit to add validation
+    var originalSubmit = $('#saleForm')[0].submit;
+    $('#saleForm')[0].submit = function() {
+        // Custom validation
         var items = JSON.parse($('#itemsData').val() || '[]');
         if (items.length === 0) {
-            e.preventDefault();
             alert('❌ Please add at least one product');
             return false;
         }
         
         if (!currentLocationId) {
-            e.preventDefault();
             alert('❌ Please select a location');
             return false;
         }
         
-        var hasStockError = false;
-        var hasPriceError = false;
-        
-        document.querySelectorAll('.product-row').forEach(function(row) {
-            if (!validateStock(row)) {
-                hasStockError = true;
-            }
-            if (!validatePrice(row)) {
-                hasPriceError = true;
-            }
-        });
-        
-        if (hasStockError) {
-            e.preventDefault();
-            alert('❌ Some products have insufficient stock. Please reduce quantities or remove items.');
-            return false;
+        // Call the original submit
+        originalSubmit.call(this);
+    };
+    
+    // Add product row function override to prevent auto-save
+    addProductRow = function() {
+        if (!currentLocationId) {
+            alert('Please select a location first');
+            document.getElementById('id_location').focus();
+            return;
         }
         
-        if (hasPriceError) {
-            e.preventDefault();
-            alert('❌ Some products have prices below cost price. Please adjust prices.');
-            return false;
-        }
+        var newRow = createProductRow();
+        document.getElementById('productsTableBody').appendChild(newRow);
+        setupRowEvents(newRow);
+        saveItemsData();
+        updateGrandTotal();
         
-        var buttonClicked = e.originalEvent ? e.originalEvent.submitter : null;
-        if (buttonClicked && buttonClicked.id === 'savePrintBtn') {
-            var printInput = document.createElement('input');
-            printInput.type = 'hidden';
-            printInput.name = 'print';
-            printInput.value = 'true';
-            this.appendChild(printInput);
-        }
-        
-        console.log('Form submitted successfully');
-    });
+        setTimeout(function() {
+            $(newRow.querySelector('.product-select')).select2('open');
+        }, 100);
+    };
     
     addProductRow();
     document.getElementById('id_document_type').value = 'receipt';
