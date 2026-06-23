@@ -314,7 +314,6 @@ function handleDocumentTypeChange() {
     var docType = $('#id_document_type').val();
     var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
     
-    // Update display
     var displayMap = {
         'receipt': 'Receipt (Auto-paid)',
         'invoice': 'Invoice (Debt)',
@@ -322,7 +321,6 @@ function handleDocumentTypeChange() {
     };
     $('#docTypeDisplay').text(displayMap[docType] || 'Receipt');
     
-    // Update hint
     var hintMap = {
         'receipt': '✅ Receipt will be auto-paid with cash',
         'invoice': '⚠️ Invoice - Payment due later (debt)',
@@ -331,7 +329,6 @@ function handleDocumentTypeChange() {
     $('#docTypeHint').text(hintMap[docType] || '');
     
     if (docType === 'receipt') {
-        // Auto-pay full amount with cash
         if (currentBill > 0) {
             $('#payment_cash').val(currentBill);
             $('#payment_mobile, #payment_bank, #payment_card').val(0);
@@ -340,13 +337,11 @@ function handleDocumentTypeChange() {
         $('#paymentStatusAlert').removeClass('alert-danger alert-warning alert-info').addClass('alert-success');
         $('#paymentStatusText').html('✅ Receipt - Auto-paid with cash');
     } else if (docType === 'invoice') {
-        // Invoice - not paid (customer owes)
         $('#payment_cash, #payment_mobile, #payment_bank, #payment_card').val(0);
         updatePaymentCalculations();
         $('#paymentStatusAlert').removeClass('alert-success alert-warning').addClass('alert-danger');
         $('#paymentStatusText').html('⚠️ Invoice - Payment due later (debt)');
     } else if (docType === 'quotation') {
-        // Quotation - not a sale
         $('#payment_cash, #payment_mobile, #payment_bank, #payment_card').val(0);
         updatePaymentCalculations();
         $('#paymentStatusAlert').removeClass('alert-success alert-danger').addClass('alert-warning');
@@ -360,4 +355,781 @@ function autoPayForReceipt() {
     var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
     
     if (documentType === 'receipt' && currentBill > 0) {
-        var currentCash = parseMoney($('#payment_cash').val()) |
+        var currentCash = parseMoney($('#payment_cash').val()) || 0;
+        var currentPaid = currentCash + 
+            (parseMoney($('#payment_mobile').val()) || 0) +
+            (parseMoney($('#payment_bank').val()) || 0) +
+            (parseMoney($('#payment_card').val()) || 0);
+        
+        if (currentPaid < currentBill) {
+            $('#payment_cash').val(currentBill);
+            $('#payment_mobile, #payment_bank, #payment_card').val(0);
+            updatePaymentCalculations();
+        }
+    }
+}
+
+// ==================== CUSTOMER BALANCE FUNCTIONS ====================
+function fetchCustomerBalance(customerId) {
+    if (!customerId || customerId === 'new') {
+        currentCustomerBalance = 0;
+        selectedCustomerId = null;
+        document.getElementById('customerBalanceAlert').style.display = 'none';
+        updateGrandTotal();
+        updatePaymentCalculations();
+        return;
+    }
+    
+    fetch('/inventory/api/customer-balance/?customer_id=' + customerId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.ok && data.balance !== undefined) {
+                currentCustomerBalance = parseFloat(data.balance) || 0;
+                selectedCustomerId = customerId;
+                
+                if (currentCustomerBalance > 0) {
+                    document.getElementById('customerBalanceAlert').style.display = 'block';
+                    document.getElementById('customerBalanceAmount').innerHTML = currencySymbol + ' ' + formatMoney(currentCustomerBalance);
+                } else {
+                    document.getElementById('customerBalanceAlert').style.display = 'none';
+                }
+                
+                updateGrandTotal();
+                updatePaymentCalculations();
+            } else {
+                currentCustomerBalance = 0;
+                updateGrandTotal();
+                updatePaymentCalculations();
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching balance:', error);
+            currentCustomerBalance = 0;
+            updateGrandTotal();
+            updatePaymentCalculations();
+        });
+}
+
+// ==================== STOCK FUNCTIONS ====================
+async function getProductStock(productId) {
+    if (!currentLocationId) return 0;
+    try {
+        var response = await fetch('/inventory/api/stock/' + productId + '/' + currentLocationId + '/');
+        if (!response.ok) return 0;
+        var data = await response.json();
+        return data.quantity || 0;
+    } catch(e) { 
+        console.error('Stock fetch error:', e);
+        return 0; 
+    }
+}
+
+function getUnitOptions(productId) {
+    var product = productsData[productId];
+    if (!product) return '<option value="">Select product first</option>';
+    
+    if (product.units && product.units.length > 0) {
+        var html = '<option value="">Select unit...</option>';
+        for (var i = 0; i < product.units.length; i++) {
+            var unit = product.units[i];
+            html += '<option value="' + unit.id + '" data-base-qty="' + unit.quantity_in_base + '" data-price="' + unit.selling_price + '" data-cost="' + product.cost_price + '">' +
+                unit.name + ' (1 = ' + unit.quantity_in_base + ' ' + product.base_unit + 's) - ' + currencySymbol + ' ' + formatMoney(unit.selling_price) +
+            '</option>';
+        }
+        return html;
+    }
+    return '<option value="default" data-base-qty="1" data-price="' + product.default_selling_price + '" data-cost="' + product.cost_price + '">' +
+        product.base_unit + ' - ' + currencySymbol + ' ' + formatMoney(product.default_selling_price) +
+    '</option>';
+}
+
+// ==================== PRODUCT ROW FUNCTIONS ====================
+function createProductRow() {
+    rowCounter++;
+    var row = document.createElement('tr');
+    row.className = 'product-row';
+    row.setAttribute('data-row-id', rowCounter);
+    
+    var productOptions = '<option value="">Select Product</option>';
+    {% for product in products %}
+    productOptions += '<option value="{{ product.id }}">{{ product.name|truncatechars:35 }}</option>';
+    {% endfor %}
+    
+    row.innerHTML = `
+        <td class="product-cell">
+            <select class="form-select form-select-sm product-select" style="width:100%">
+                ${productOptions}
+            </select>
+          </td>
+        <td class="unit-cell">
+            <select class="form-select form-select-sm unit-select" disabled style="width:100%">
+                <option value="">Select product</option>
+            </select>
+          </td>
+        <td class="stock-cell stock-info text-center fw-bold">-</td>
+        <td>
+            <input type="number" class="form-control form-control-sm quantity" min="0.01" step="0.01" value="1" disabled>
+        </td>
+        <td>
+            <input type="number" class="form-control form-control-sm unit-price" step="100" min="0" placeholder="Enter price">
+        </td>
+        <td>
+            <input type="text" class="form-control form-control-sm total" readonly value="0">
+        </td>
+        <td class="text-center">
+            <button type="button" class="btn btn-danger btn-sm remove-row">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>
+    `;
+    
+    return row;
+}
+
+async function updateStockInfo(row) {
+    var productSelect = row.querySelector('.product-select');
+    var unitSelect = row.querySelector('.unit-select');
+    var stockSpan = row.querySelector('.stock-info');
+    var productId = productSelect ? productSelect.value : null;
+    var unitValue = unitSelect ? unitSelect.value : null;
+    
+    if (!currentLocationId || !productId || !unitValue) {
+        stockSpan.textContent = '-';
+        return;
+    }
+    
+    var stock = await getProductStock(productId);
+    var selectedOption = unitSelect.options[unitSelect.selectedIndex];
+    if (!selectedOption) return;
+    
+    var baseQty = parseFloat(selectedOption.dataset.baseQty || 1);
+    var availableUnits = stock / baseQty;
+    
+    stockSpan.innerHTML = availableUnits.toFixed(2);
+    
+    if (availableUnits < 0.01) {
+        stockSpan.style.color = '#ef4444';
+    } else if (availableUnits < 10) {
+        stockSpan.style.color = '#f59e0b';
+    } else {
+        stockSpan.style.color = '#10b981';
+    }
+    
+    validateStock(row);
+}
+
+function validateStock(row) {
+    var quantityInput = row.querySelector('.quantity');
+    var stockSpan = row.querySelector('.stock-info');
+    var quantity = parseFloat(quantityInput.value) || 0;
+    var availableStock = parseFloat(stockSpan.textContent) || 0;
+    
+    row.querySelector('.stock-error')?.remove();
+    
+    if (quantity > availableStock && availableStock > 0) {
+        quantityInput.classList.add('is-invalid');
+        var errorSpan = document.createElement('small');
+        errorSpan.className = 'stock-error text-danger';
+        errorSpan.innerHTML = '<i class="fas fa-exclamation-circle"></i> Only ' + availableStock.toFixed(2) + ' units available in stock';
+        quantityInput.parentNode.appendChild(errorSpan);
+        return false;
+    } else {
+        quantityInput.classList.remove('is-invalid');
+        return true;
+    }
+}
+
+function validatePrice(row) {
+    var priceInput = row.querySelector('.unit-price');
+    var unitSelect = row.querySelector('.unit-select');
+    var price = parseFloat(priceInput.value) || 0;
+    var unitValue = unitSelect ? unitSelect.value : null;
+    
+    row.querySelector('.price-error')?.remove();
+    
+    if (!unitValue || price === 0) {
+        return true;
+    }
+    
+    var selectedOption = unitSelect.options[unitSelect.selectedIndex];
+    var costPrice = parseFloat(selectedOption?.dataset.cost) || 0;
+    
+    if (price < costPrice && costPrice > 0) {
+        priceInput.classList.add('is-invalid');
+        var errorSpan = document.createElement('small');
+        errorSpan.className = 'price-error text-danger';
+        errorSpan.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Price below cost (UGX ' + formatMoney(costPrice) + ')';
+        priceInput.parentNode.appendChild(errorSpan);
+        return false;
+    } else {
+        priceInput.classList.remove('is-invalid');
+        return true;
+    }
+}
+
+function recalcRow(row) {
+    var quantity = parseFloat(row.querySelector('.quantity').value) || 0;
+    var price = parseFloat(row.querySelector('.unit-price').value) || 0;
+    var total = quantity * price;
+    row.querySelector('.total').value = formatMoney(total);
+    
+    validateStock(row);
+    validatePrice(row);
+    
+    updateGrandTotal();
+    saveItemsData();
+}
+
+function updateGrandTotal() {
+    var total = 0;
+    document.querySelectorAll('.product-row').forEach(function(row) {
+        total += parseMoney(row.querySelector('.total').value);
+    });
+    document.getElementById('grandTotal').innerText = formatMoney(total);
+    document.getElementById('saleTotalDisplay').innerHTML = currencySymbol + ' ' + formatMoney(total);
+    document.getElementById('itemsCount').innerHTML = document.querySelectorAll('.product-row').length + ' items';
+    updatePaymentCalculations();
+    
+    var docType = $('#id_document_type').val();
+    if (docType === 'receipt') {
+        autoPayForReceipt();
+    }
+}
+
+function updatePaymentCalculations() {
+    var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
+    var totalDue = currentBill + currentCustomerBalance;
+    var cash = parseMoney(document.getElementById('payment_cash').value) || 0;
+    var mobile = parseMoney(document.getElementById('payment_mobile').value) || 0;
+    var bank = parseMoney(document.getElementById('payment_bank').value) || 0;
+    var card = parseMoney(document.getElementById('payment_card').value) || 0;
+    
+    var totalCollected = cash + mobile + bank + card;
+    var remainingDue = totalDue - totalCollected;
+    var changeDue = totalCollected > totalDue ? totalCollected - totalDue : 0;
+    
+    document.getElementById('totalCollected').innerHTML = currencySymbol + ' ' + formatMoney(totalCollected);
+    document.getElementById('balanceDue').innerHTML = currencySymbol + ' ' + formatMoney(Math.max(0, remainingDue));
+    document.getElementById('currentBillDisplay').innerHTML = currencySymbol + ' ' + formatMoney(currentBill);
+    
+    if (currentCustomerBalance > 0) {
+        document.getElementById('prevBalanceDisplay').innerHTML = currencySymbol + ' ' + formatMoney(currentCustomerBalance);
+        document.getElementById('prevBalanceContainer').style.display = 'block';
+        document.getElementById('prevBalanceRow').style.display = 'flex';
+        document.getElementById('prevBalanceTotal').innerHTML = currencySymbol + ' ' + formatMoney(currentCustomerBalance);
+        document.getElementById('totalDueDisplay').innerHTML = currencySymbol + ' ' + formatMoney(totalDue);
+        document.getElementById('totalDueContainer').style.display = 'block';
+        document.getElementById('totalDueRow').style.display = 'flex';
+        document.getElementById('totalDue').innerHTML = currencySymbol + ' ' + formatMoney(totalDue);
+    } else {
+        document.getElementById('prevBalanceContainer').style.display = 'none';
+        document.getElementById('prevBalanceRow').style.display = 'none';
+        document.getElementById('totalDueContainer').style.display = 'none';
+        document.getElementById('totalDueRow').style.display = 'none';
+    }
+    
+    if (changeDue > 0) {
+        document.getElementById('changeDue').innerHTML = currencySymbol + ' ' + formatMoney(changeDue);
+        document.getElementById('changeRow').style.display = 'flex';
+        document.getElementById('balanceRow').style.display = 'none';
+    } else {
+        document.getElementById('changeRow').style.display = 'none';
+        document.getElementById('balanceRow').style.display = 'flex';
+    }
+    
+    document.getElementById('id_paid_amount').value = totalCollected;
+    updatePaymentStatus();
+}
+
+function updatePaymentStatus() {
+    var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
+    var totalDue = currentBill + currentCustomerBalance;
+    var totalPaid = parseMoney(document.getElementById('totalCollected').innerText.replace(/[^0-9.-]/g, ''));
+    var alertDiv = document.getElementById('paymentStatusAlert');
+    var documentType = $('#id_document_type').val();
+    
+    if (!currentLocationId) {
+        alertDiv.className = 'alert alert-secondary mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '📍 Select location';
+    } else if (currentBill === 0) {
+        alertDiv.className = 'alert alert-warning mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '➕ Add products';
+    } else if (documentType === 'receipt') {
+        alertDiv.className = 'alert alert-success mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '✅ Receipt - Paid with cash';
+    } else if (documentType === 'quotation') {
+        alertDiv.className = 'alert alert-warning mb-2 py-2 text-center';
+        document.getElementById('paymentStatusText').innerHTML = '📝 Quotation - No stock deduction';
+    } else if (documentType === 'invoice') {
+        if (totalPaid >= totalDue) {
+            alertDiv.className = 'alert alert-success mb-2 py-2 text-center';
+            document.getElementById('paymentStatusText').innerHTML = '✅ Invoice - Fully paid';
+        } else if (totalPaid > 0) {
+            alertDiv.className = 'alert alert-info mb-2 py-2 text-center';
+            document.getElementById('paymentStatusText').innerHTML = '💰 Invoice - Partially paid';
+        } else {
+            alertDiv.className = 'alert alert-danger mb-2 py-2 text-center';
+            document.getElementById('paymentStatusText').innerHTML = '⚠️ Invoice - Unpaid (debt)';
+        }
+    }
+}
+
+function saveItemsData() {
+    var items = [];
+    document.querySelectorAll('.product-row').forEach(function(row) {
+        var productSelect = row.querySelector('.product-select');
+        var unitSelect = row.querySelector('.unit-select');
+        var productId = productSelect ? productSelect.value : null;
+        var unitId = unitSelect ? unitSelect.value : null;
+        
+        if (productId && unitId && unitId !== '') {
+            var quantity = parseFloat(row.querySelector('.quantity').value) || 0;
+            var price = parseFloat(row.querySelector('.unit-price').value) || 0;
+            var selectedOption = unitSelect.options[unitSelect.selectedIndex];
+            var baseQty = selectedOption ? parseFloat(selectedOption.dataset.baseQty || 1) : 1;
+            
+            items.push({
+                product_id: parseInt(productId),
+                unit_id: unitId === 'default' ? null : parseInt(unitId),
+                quantity: quantity,
+                unit_price: price,
+                total: quantity * price,
+                base_quantity: quantity * baseQty
+            });
+        }
+    });
+    document.getElementById('itemsData').value = JSON.stringify(items);
+}
+
+function savePaymentData() {
+    var payments = [];
+    var cash = parseMoney(document.getElementById('payment_cash').value);
+    if (cash > 0) payments.push({ method: 'cash', amount: cash, reference: '' });
+    
+    var mobile = parseMoney(document.getElementById('payment_mobile').value);
+    if (mobile > 0) payments.push({ 
+        method: 'mobile_money', 
+        amount: mobile, 
+        reference: document.getElementById('mobile_reference').value 
+    });
+    
+    var bank = parseMoney(document.getElementById('payment_bank').value);
+    if (bank > 0) payments.push({ 
+        method: 'bank_transfer', 
+        amount: bank, 
+        reference: document.getElementById('bank_reference').value 
+    });
+    
+    var card = parseMoney(document.getElementById('payment_card').value);
+    if (card > 0) payments.push({ 
+        method: 'credit_card', 
+        amount: card, 
+        reference: document.getElementById('card_reference').value 
+    });
+    
+    document.getElementById('paymentData').value = JSON.stringify(payments);
+}
+
+function updateCurrency() {
+    currencySymbol = document.getElementById('id_currency').value;
+    document.getElementById('currencySymbol').innerText = currencySymbol;
+    updateGrandTotal();
+}
+
+function updateAllStockInfo() {
+    currentLocationId = document.getElementById('id_location').value;
+    var statusText = currentLocationId ? 'Location selected' : 'No location';
+    document.getElementById('locationStatus').innerHTML = statusText;
+    
+    if (currentLocationId) {
+        document.querySelectorAll('.product-row').forEach(function(row) {
+            updateStockInfo(row);
+        });
+    }
+    updatePaymentStatus();
+}
+
+function setupRowEvents(row) {
+    var productSelect = row.querySelector('.product-select');
+    var unitSelect = row.querySelector('.unit-select');
+    var quantityInput = row.querySelector('.quantity');
+    var priceInput = row.querySelector('.unit-price');
+    var removeBtn = row.querySelector('.remove-row');
+    
+    $(productSelect).select2({
+        width: '100%',
+        dropdownParent: $(row),
+        placeholder: 'Search product...'
+    });
+    
+    $(productSelect).on('change', async function() {
+        var productId = this.value;
+        
+        if (productId && productsData[productId]) {
+            unitSelect.disabled = false;
+            unitSelect.innerHTML = getUnitOptions(productId);
+            
+            $(unitSelect).select2({
+                width: '100%',
+                dropdownParent: $(row),
+                placeholder: 'Select unit...'
+            });
+            
+            $(unitSelect).off('change').on('change', function() {
+                var opt = this.options[this.selectedIndex];
+                if (opt && opt.dataset && opt.dataset.price) {
+                    var defaultPrice = parseFloat(opt.dataset.price);
+                    var costPrice = parseFloat(opt.dataset.cost) || 0;
+                    
+                    priceInput.value = defaultPrice.toFixed(0);
+                    priceInput.dataset.defaultPrice = defaultPrice;
+                    priceInput.dataset.minPrice = costPrice;
+                    quantityInput.disabled = false;
+                    
+                    if (defaultPrice < costPrice && costPrice > 0) {
+                        priceInput.classList.add('is-invalid');
+                        row.querySelector('.price-error')?.remove();
+                        var errorSpan = document.createElement('small');
+                        errorSpan.className = 'price-error text-danger';
+                        errorSpan.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Price below cost (UGX ' + formatMoney(costPrice) + ')';
+                        priceInput.parentNode.appendChild(errorSpan);
+                    } else {
+                        priceInput.classList.remove('is-invalid');
+                        row.querySelector('.price-error')?.remove();
+                    }
+                    
+                    updateStockInfo(row);
+                    recalcRow(row);
+                }
+            });
+            
+            await updateStockInfo(row);
+        } else {
+            unitSelect.disabled = true;
+            unitSelect.innerHTML = '<option value="">Select product</option>';
+            quantityInput.disabled = true;
+            priceInput.value = '';
+            recalcRow(row);
+        }
+    });
+    
+    priceInput.addEventListener('input', function() {
+        validatePrice(row);
+        recalcRow(row);
+    });
+    
+    quantityInput.addEventListener('input', function() {
+        validateStock(row);
+        recalcRow(row);
+    });
+    
+    if (removeBtn) {
+        removeBtn.addEventListener('click', function() {
+            row.remove();
+            updateGrandTotal();
+            saveItemsData();
+        });
+    }
+}
+
+function addProductRow() {
+    if (!currentLocationId) {
+        alert('Please select a location first');
+        document.getElementById('id_location').focus();
+        return;
+    }
+    
+    var newRow = createProductRow();
+    document.getElementById('productsTableBody').appendChild(newRow);
+    setupRowEvents(newRow);
+    saveItemsData();
+    updateGrandTotal();
+    
+    setTimeout(function() {
+        $(newRow.querySelector('.product-select')).select2('open');
+    }, 100);
+}
+
+// ==================== CUSTOMER FIELD SETUP ====================
+function setupCustomerField() {
+    var customerSelect = $('#id_customer');
+    var customNameInput = $('#custom_customer_name');
+    var customPhoneInput = $('#custom_customer_phone');
+    
+    customerSelect.select2({
+        width: '100%',
+        placeholder: 'Select customer...',
+        allowClear: true
+    });
+    
+    customerSelect.on('change', function() {
+        var selectedValue = $(this).val();
+        
+        if (selectedValue === 'new') {
+            customNameInput.show();
+            customPhoneInput.show();
+            customNameInput.attr('name', 'customer_name');
+            customPhoneInput.attr('name', 'customer_phone');
+            currentCustomerBalance = 0;
+            selectedCustomerId = null;
+            document.getElementById('customerBalanceAlert').style.display = 'none';
+            updateGrandTotal();
+            updatePaymentCalculations();
+        } else if (selectedValue && selectedValue !== '') {
+            customNameInput.hide();
+            customPhoneInput.hide();
+            customNameInput.removeAttr('name');
+            customPhoneInput.removeAttr('name');
+            fetchCustomerBalance(selectedValue);
+        } else {
+            customNameInput.hide();
+            customPhoneInput.hide();
+            customNameInput.removeAttr('name');
+            customPhoneInput.removeAttr('name');
+            currentCustomerBalance = 0;
+            selectedCustomerId = null;
+            document.getElementById('customerBalanceAlert').style.display = 'none';
+            updateGrandTotal();
+            updatePaymentCalculations();
+        }
+    });
+}
+
+// ==================== RESTORE HELD SALE FUNCTIONALITY ====================
+{% if held_sale_data %}
+var heldSaleData = {{ held_sale_data|safe }};
+
+if (heldSaleData && heldSaleData.items && heldSaleData.items.length > 0) {
+    console.log('Restoring held sale:', heldSaleData);
+    
+    if (heldSaleData.location_id) {
+        $('#id_location').val(heldSaleData.location_id).trigger('change');
+    }
+    if (heldSaleData.document_type) {
+        $('#id_document_type').val(heldSaleData.document_type).trigger('change');
+    }
+    if (heldSaleData.currency) {
+        $('#id_currency').val(heldSaleData.currency).trigger('change');
+    }
+    if (heldSaleData.notes) {
+        $('textarea[name="notes"]').val(heldSaleData.notes);
+    }
+    if (heldSaleData.customer_id) {
+        $('#id_customer').val(heldSaleData.customer_id).trigger('change');
+    } else if (heldSaleData.customer_name) {
+        $('#id_customer').val('new').trigger('change');
+        $('#custom_customer_name').val(heldSaleData.customer_name).show();
+        if (heldSaleData.customer_phone) {
+            $('#custom_customer_phone').val(heldSaleData.customer_phone).show();
+        }
+    }
+    
+    setTimeout(function() {
+        for (var i = 0; i < heldSaleData.items.length; i++) {
+            addItemFromHold(heldSaleData.items[i]);
+        }
+        setTimeout(function() {
+            updateGrandTotal();
+            updatePaymentCalculations();
+        }, 1000);
+    }, 1500);
+}
+{% endif %}
+
+function addItemFromHold(item) {
+    var newRow = createProductRow();
+    document.getElementById('productsTableBody').appendChild(newRow);
+    setupRowEvents(newRow);
+    
+    var productSelect = $(newRow).find('.product-select');
+    productSelect.val(item.product_id).trigger('change');
+    
+    setTimeout(function() {
+        var unitSelect = $(newRow).find('.unit-select');
+        unitSelect.find('option').each(function() {
+            if ($(this).val() == item.unit_id || 
+                $(this).text().toLowerCase().includes(item.unit_name.toLowerCase())) {
+                $(this).prop('selected', true);
+                unitSelect.trigger('change');
+                return false;
+            }
+        });
+        $(newRow).find('.quantity').val(item.quantity).trigger('input');
+        $(newRow).find('.unit-price').val(item.unit_price).trigger('input');
+    }, 800);
+}
+
+// ==================== DOCUMENT READY ====================
+$(document).ready(function() {
+    console.log('Sale form initialized');
+    setupCustomerField();
+    
+    $('#id_location').select2({ 
+        width: '100%', 
+        placeholder: 'Select location...',
+        allowClear: true
+    }).on('change', updateAllStockInfo);
+    
+    $('#id_document_type').select2({ width: '100%' }).on('change', function() {
+        handleDocumentTypeChange();
+    });
+    
+    $('#id_currency').select2({ width: '100%' }).on('change', updateCurrency);
+    
+    var locationSelect = document.getElementById('id_location');
+    if (locationSelect && locationSelect.options.length === 2) {
+        locationSelect.selectedIndex = 1;
+        currentLocationId = locationSelect.value;
+        updateAllStockInfo();
+        $('#id_location').trigger('change');
+    }
+    
+    $('.payment-input').on('input', updatePaymentCalculations);
+    
+    $('.quick-pay-btn').on('click', function() {
+        var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
+        var totalDue = currentBill + currentCustomerBalance;
+        var amountType = $(this).data('amount');
+        
+        $('#payment_cash, #payment_mobile, #payment_bank, #payment_card').val(0);
+        
+        if (amountType === 'full') {
+            $('#payment_cash').val(totalDue);
+        } else if (amountType === 'half') {
+            $('#payment_cash').val(Math.ceil(totalDue / 2));
+        }
+        
+        $('.payment-input').trigger('input');
+        updatePaymentCalculations();
+    });
+    
+    $('.payment-label').on('click', function() {
+        var currentBill = parseMoney(document.getElementById('grandTotal').innerText);
+        var totalDue = currentBill + currentCustomerBalance;
+        var currentPaid = 0;
+        
+        $('#payment_cash, #payment_mobile, #payment_bank, #payment_card').each(function() {
+            currentPaid += parseMoney($(this).val());
+        });
+        
+        var remaining = totalDue - currentPaid;
+        
+        if (remaining > 0) {
+            var paymentType = $(this).data('payment');
+            var targetInput = $('#payment_' + paymentType);
+            targetInput.val(parseMoney(targetInput.val()) + remaining);
+            targetInput.trigger('input');
+            updatePaymentCalculations();
+        } else if (remaining < 0) {
+            alert('Already overpaid! Change will be given.');
+        }
+    });
+    
+    $('#addProductBtn').on('click', function(e) {
+        e.preventDefault();
+        addProductRow();
+    });
+    
+    $('#resetButton').on('click', function() {
+        if (confirm('Reset all data?')) {
+            $('#productsTableBody').empty();
+            $('#saleForm')[0].reset();
+            $('#grandTotal').text('0');
+            $('#itemsData').val('[]');
+            $('#payment_cash, #payment_mobile, #payment_bank, #payment_card').val(0);
+            $('#id_currency').val('UGX').trigger('change');
+            currentLocationId = null;
+            currentCustomerBalance = 0;
+            selectedCustomerId = null;
+            updatePaymentStatus();
+            updatePaymentCalculations();
+            addProductRow();
+            $('#id_customer').val('').trigger('change');
+            $('#custom_customer_name').hide().val('');
+            $('#custom_customer_phone').hide().val('');
+            document.getElementById('customerBalanceAlert').style.display = 'none';
+            $('#id_document_type').val('receipt').trigger('change');
+            handleDocumentTypeChange();
+        }
+    });
+    
+    $('#saleForm').on('keydown', function(e) {
+        if (e.key === 'Enter') {
+            var tag = e.target.tagName.toLowerCase();
+            if (tag === 'input' || tag === 'select') {
+                e.preventDefault();
+                return false;
+            }
+        }
+    });
+    
+    $('#saleForm').on('submit', function(e) {
+        var submitter = e.originalEvent ? e.originalEvent.submitter : null;
+        if (!submitter) {
+            e.preventDefault();
+            return false;
+        }
+        
+        var validButtons = ['createSaleBtn', 'saveHoldBtn', 'savePrintBtn'];
+        if (submitter && validButtons.includes(submitter.id)) {
+            return true;
+        } else {
+            e.preventDefault();
+            return false;
+        }
+    });
+    
+    var originalSubmit = $('#saleForm')[0].submit;
+    $('#saleForm')[0].submit = function() {
+        var items = JSON.parse($('#itemsData').val() || '[]');
+        if (items.length === 0) {
+            alert('❌ Please add at least one product');
+            return false;
+        }
+        
+        if (!currentLocationId) {
+            alert('❌ Please select a location');
+            return false;
+        }
+        
+        originalSubmit.call(this);
+    };
+    
+    addProductRow();
+    document.getElementById('id_document_type').value = 'receipt';
+    document.getElementById('id_currency').value = 'UGX';
+    handleDocumentTypeChange();
+});
+</script>
+
+<style>
+.form-select-sm, .form-control-sm { font-size: 0.8rem; }
+.table-sm th, .table-sm td { padding: 0.4rem; vertical-align: middle; }
+.select2-container--default .select2-selection--single { height: 31px; }
+.select2-container--default .select2-selection--single .select2-selection__rendered { line-height: 29px; }
+.btn-sm { padding: 0.25rem 0.5rem; }
+.alert-sm { padding: 0.3rem 0.5rem; font-size: 0.75rem; }
+.stock-info { font-weight: bold; }
+.is-invalid {
+    border-color: #ef4444 !important;
+    background-color: rgba(239, 68, 68, 0.1) !important;
+}
+.stock-error, .price-error {
+    display: block;
+    font-size: 0.7rem;
+    margin-top: 3px;
+    color: #ef4444;
+}
+.payment-label:hover { opacity: 0.8; transform: scale(1.02); transition: all 0.2s; cursor: pointer; }
+.customer-container .select2-container { width: 100% !important; }
+.receipt-option {
+    background-color: #d1fae5;
+    font-weight: bold;
+}
+#docTypeHint {
+    display: block;
+    font-size: 0.7rem;
+    margin-top: 3px;
+}
+</style>
+{% endblock %}
